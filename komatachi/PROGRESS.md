@@ -97,9 +97,10 @@ Files created:
 1. **Single embedding provider** - One provider behind a clean interface
 2. **No plugin hooks for core behavior** - Static, predictable behavior
 3. **Vector-only search** - Modern embeddings are sufficient
-4. **Cross-agent session access preserved** - Essential user functionality
+4. **Cross-agent session access** - Deferred. Essential for power users, but not needed for minimal viable agent. Will add when requirements demand it.
 5. **TypeScript with Rust portability** - Distill into TypeScript, but write code that converts easily to Rust. Avoid TypeScript-only tricks; verify heavy dependencies have Rust ecosystem equivalents.
 6. **Minimal viable agent** - A CLI where an agent using a Claude subscription can read and write files via tools. We'll refine this definition as we go.
+7. **No gateway for minimal scope** - Single-process CLI doesn't need a broker. Design session storage and tool execution so they *could* be fronted by a broker later, but don't build it until needed. If/when we need a broker, prefer local-first IPC (ZeroMQ, Unix sockets) over web-oriented tech (WebSocket, HTTP). The gateway pattern solves multi-client and multi-agent problems we don't have yet.
 
 ---
 
@@ -115,6 +116,18 @@ Files created:
 ### From OpenClaw AGENTS.md Analysis
 
 The original codebase had **no architectural principles documented**—only operational procedures. This absence likely contributed to complexity accumulation. The distilled system must embed principles alongside code.
+
+### From Gateway Analysis
+
+Traced cross-agent communication in OpenClaw. The gateway is a WebSocket-based JSON-RPC broker that:
+- Routes messages between agents via session key prefixes (`agent:<agentId>:...`)
+- Maintains combined view of all agent session stores
+- Handles multi-client streaming (web, mobile, CLI)
+- Enforces auth and access control
+
+**Key insight**: The gateway solves problems that emerge from multi-client and multi-agent requirements. A single-process CLI has none of these problems. The lesson isn't "always use a gateway"—it's "when you need multi-client or multi-agent, you need a broker."
+
+**Design implication**: Keep session storage and tool execution decoupled enough that a broker could be added later without rewriting core logic.
 
 ---
 
@@ -137,7 +150,7 @@ The original codebase had **no architectural principles documented**—only oper
 
 ## Open Questions
 
-1. How do we handle cross-agent session access (marked as essential)?
+None currently. Cross-agent session access question resolved—deferred until requirements demand it (see decisions #4 and #7).
 
 ---
 
