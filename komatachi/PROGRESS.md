@@ -6,23 +6,43 @@
 
 | Aspect | State |
 |--------|-------|
-| **Phase** | Architectural decisions clarified; ready for next component |
-| **Last completed** | Gateway analysis, scope narrowing, tech strategy decisions |
-| **Next action** | Choose next component to distill (see "Next Steps" below) |
+| **Phase** | Architecture clarified; MVP defined |
+| **Last completed** | Runtime model analysis, daemon/CLI architecture decision |
+| **Next action** | Begin MVP implementation (see "MVP Architecture" below) |
 | **Blockers** | None |
 
 ### What Exists Now
-- [x] Scouting reports for 4 core areas (~20k LOC analyzed)
+- [x] Scouting reports for 5 core areas (~20k LOC analyzed + runtime model)
 - [x] Distillation principles documented (8 principles)
 - [x] Trial distillation: `src/compaction/` working
-- [x] Key architectural decisions (TypeScript+Rust, minimal viable agent, no gateway)
+- [x] Key architectural decisions (TypeScript+Rust, minimal viable agent, daemon/CLI split)
+- [x] MVP architecture defined (daemon + CLI over local IPC)
 
-### Open Decision Needed
-**Which component to distill next?** Candidates ranked by isolation:
-1. Long-term Memory & Search (most isolated)
-2. Context Management (builds on compaction)
-3. Agent Alignment (defines behavior)
-4. Session Management (largest, most interconnected—deferred per decision #7)
+### MVP Architecture (Decided)
+
+The minimal viable Komatachi is a **daemon + CLI** system:
+
+```
+┌─────────────────┐         ┌─────────────────────────────────┐
+│   komatachi     │  IPC    │        komatachi-daemon         │
+│     (CLI)       │◄───────►│                                 │
+│                 │         │  - Session state (file-based)   │
+│ Thin client:    │         │  - Tool execution (read/write)  │
+│ - Send prompts  │         │  - LLM API calls                │
+│ - Display output│         │  - Conversation history         │
+│ - No state      │         │                                 │
+└─────────────────┘         └─────────────────────────────────┘
+```
+
+**Why this split?**
+- Prepares for remote operation (CLI on laptop, daemon on server)
+- Clean boundary for testing
+- State ownership is unambiguous
+- No shared-memory coupling
+
+**For MVP, both run on same machine** using Unix socket or localhost TCP.
+
+See decision #8 below and `scouting/runtime-model.md` for full analysis
 
 ---
 
@@ -36,7 +56,7 @@ This file tracks our progress distilling OpenClaw into Komatachi. Maintaining th
 
 ### 1. Scouting (Complete)
 
-Analyzed four core functional areas of OpenClaw:
+Analyzed five core areas of OpenClaw:
 
 | Component | LOC | Files | Complexity | Report |
 |-----------|-----|-------|------------|--------|
@@ -44,8 +64,11 @@ Analyzed four core functional areas of OpenClaw:
 | Long-term Memory & Search | 5,713 | 25 | HIGH | `scouting/long-term-memory-search.md` |
 | Agent Alignment | 4,261 | 18 | HIGH | `scouting/agent-alignment.md` |
 | Session Management | 7,319 | 35+ | HIGH | `scouting/session-management.md` |
+| **Runtime Model** | ~5,000 | 20+ | MEDIUM-HIGH | `scouting/runtime-model.md` |
 
-**Total**: ~20,000 lines of high-complexity code
+**Total**: ~25,000 lines analyzed
+
+**Runtime Model** (new): Documents OpenClaw's daemon architecture—how the Gateway process runs, how CLI communicates via WebSocket, how agents execute in-process, and how state is persisted. Critical for understanding how to structure Komatachi's MVP
 
 ### 2. Distillation Principles (Complete)
 
@@ -101,7 +124,14 @@ Files created:
 4. **Cross-agent session access** - Deferred. Essential for power users, but not needed for minimal viable agent. Will add when requirements demand it.
 5. **TypeScript with Rust portability** - Distill into TypeScript, but write code that converts easily to Rust. Avoid TypeScript-only tricks; verify heavy dependencies have Rust ecosystem equivalents.
 6. **Minimal viable agent** - A CLI where an agent using a Claude subscription can read and write files via tools. We'll refine this definition as we go.
-7. **No gateway for minimal scope** - Single-process CLI doesn't need inter-process communication. Design session storage and tool execution so they *could* support multi-agent later, but don't build it until needed. If/when we need multi-agent communication, prefer local-first IPC (ZeroMQ, Unix sockets) over web-oriented tech (WebSocket, HTTP). Note: ZeroMQ supports broker-less patterns (direct peer-to-peer)—a central broker may not be required at all.
+7. **No message-broker gateway for minimal scope** - We don't need OpenClaw's WebSocket-based multi-client message routing. But see decision #8—we DO split daemon from CLI.
+8. **Daemon/CLI architecture from day one** - Even for MVP, separate the persistent process (daemon) from the user interface (CLI). They communicate via local IPC (Unix socket or localhost). This ensures:
+   - Architecture supports remote operation (CLI on laptop, daemon on server) without redesign
+   - Clean boundary for testing (mock either side)
+   - State ownership is unambiguous (all state on daemon side)
+   - No hidden coupling via shared filesystem access from CLI
+
+   **OpenClaw insight**: The Gateway daemon owns all state and runs agents in-process. The CLI is a thin stateless client. This is the right pattern. We adopt it, but simplify the protocol (no multi-client streaming, no presence, no nodes)
 
 ---
 
@@ -130,22 +160,51 @@ Traced cross-agent communication in OpenClaw. The gateway is a WebSocket-based J
 
 **Design implication**: Keep session storage and tool execution decoupled enough that a broker could be added later without rewriting core logic.
 
+### From Runtime Model Analysis (New)
+
+1. **Agents run in-process** - OpenClaw's `runEmbeddedPiAgent()` runs agents inside the Gateway process, not as subprocesses. Simple but couples crash domains.
+
+2. **CLI is truly stateless** - The CLI connects to Gateway via WebSocket, sends commands, displays output. Zero local state. This is the right model.
+
+3. **File-based state is sufficient** - Sessions, transcripts, and config are all JSON/JSONL files. SQLite/Postgres are not required for single-user operation.
+
+4. **Service managers matter** - launchd/systemd integration provides auto-restart, log rotation, boot startup. Essential for "always-on" operation.
+
+5. **Protocol can be simple** - OpenClaw's protocol has many features (presence, nodes, multi-client streaming) we don't need. A request/response RPC over Unix socket is sufficient for MVP.
+
+**Critical insight for Komatachi**: Don't collapse daemon and CLI into one process. The separation enables remote operation and clean testing boundaries. The protocol can start simple (JSON-RPC over Unix socket) and evolve.
+
 ---
 
 ## Next Steps
 
-1. **Decide next component to distill** - Candidates:
-   - Context Management (builds on compaction work)
-   - Long-term Memory & Search (most isolated)
-   - Agent Alignment (defines agent behavior)
-   - Session Management (largest, most interconnected)
+### Immediate: Build MVP Foundation
 
-2. **Consider technology choices** - The distilled system may use:
-   - Different language (Rust? Go?)
-   - Different storage (SQLite? Postgres?)
-   - Different architecture
+1. **Implement daemon skeleton** - A process that:
+   - Listens on Unix socket (or localhost TCP)
+   - Accepts JSON-RPC requests
+   - Manages file-based session state
+   - Can be started/stopped cleanly
 
-3. **Establish testing strategy** - How do we validate behavioral equivalence?
+2. **Implement CLI skeleton** - A binary that:
+   - Connects to daemon socket
+   - Sends prompt, receives streaming response
+   - Displays output to terminal
+   - Holds no local state
+
+3. **Implement minimal agent loop** - Inside daemon:
+   - Load session history
+   - Call Claude API with tools (read, write)
+   - Execute tool calls
+   - Persist session
+   - Stream response to CLI
+
+### Later: Enhance
+
+4. **Add compaction** - Use distilled compaction when context approaches limit
+5. **Add service management** - launchd/systemd integration for auto-restart
+6. **Add authentication** - Token-based auth for remote operation
+7. **Add more tools** - exec, browser, etc. as needed
 
 ---
 
@@ -166,7 +225,8 @@ komatachi/
 │   ├── context-management.md
 │   ├── long-term-memory-search.md
 │   ├── agent-alignment.md
-│   └── session-management.md
+│   ├── session-management.md
+│   └── runtime-model.md  # NEW: Daemon architecture analysis
 └── src/
     └── compaction/     # First distilled module
         ├── index.ts

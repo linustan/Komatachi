@@ -19,7 +19,8 @@ komatachi/
 │   ├── context-management.md
 │   ├── long-term-memory-search.md
 │   ├── agent-alignment.md
-│   └── session-management.md
+│   ├── session-management.md
+│   └── runtime-model.md  # Daemon/CLI architecture analysis
 └── src/
     └── compaction/     # First distilled module (trial)
         ├── index.ts
@@ -42,7 +43,31 @@ See [DISTILLATION.md](./DISTILLATION.md) for the full principles. The key ones:
 1. **Single embedding provider** - One provider behind a clean interface, not multiple with fallback logic
 2. **No plugin hooks for core behavior** - Core behavior is static and predictable
 3. **Vector-only search** - Modern embeddings are sufficient; hybrid search adds complexity without proportional value
-4. **Cross-agent session access preserved** - This is essential functionality that serves real user needs
+4. **Cross-agent session access** - Deferred until requirements demand it
+5. **TypeScript with Rust portability** - Write code that converts easily to Rust
+6. **Daemon/CLI split from day one** - Even for MVP, separate persistent daemon from stateless CLI (see below)
+
+### MVP Architecture
+
+```
+┌─────────────────┐         ┌─────────────────────────────────┐
+│   komatachi     │  IPC    │        komatachi-daemon         │
+│     (CLI)       │◄───────►│                                 │
+│                 │         │  - Session state (file-based)   │
+│ Thin client:    │         │  - Tool execution (read/write)  │
+│ - Send prompts  │         │  - LLM API calls                │
+│ - Display output│         │  - Conversation history         │
+│ - No state      │         │                                 │
+└─────────────────┘         └─────────────────────────────────┘
+```
+
+**Why this split?**
+- Prepares for remote operation (CLI on laptop, daemon on server)
+- Clean boundary for testing
+- State ownership is unambiguous (daemon owns all state)
+- No hidden coupling via shared filesystem
+
+See `scouting/runtime-model.md` for full analysis of OpenClaw's architecture
 
 ---
 
