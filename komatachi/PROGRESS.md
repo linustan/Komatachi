@@ -6,23 +6,22 @@
 
 | Aspect | State |
 |--------|-------|
-| **Phase** | Architectural decisions clarified; ready for next component |
-| **Last completed** | Gateway analysis, scope narrowing, tech strategy decisions |
-| **Next action** | Choose next component to distill (see "Next Steps" below) |
+| **Phase** | Validating distillation process via compaction tests |
+| **Last completed** | Decided on validation-first approach |
+| **Next action** | Write tests for compaction module |
 | **Blockers** | None |
 
 ### What Exists Now
 - [x] Scouting reports for 4 core areas (~20k LOC analyzed)
 - [x] Distillation principles documented (8 principles)
-- [x] Trial distillation: `src/compaction/` working
+- [x] Trial distillation: `src/compaction/` code complete
+- [ ] Compaction tests (in progress)
 - [x] Key architectural decisions (TypeScript+Rust, minimal viable agent, no gateway)
 
-### Open Decision Needed
-**Which component to distill next?** Candidates ranked by isolation:
-1. Long-term Memory & Search (most isolated)
-2. Context Management (builds on compaction)
-3. Agent Alignment (defines behavior)
-4. Session Management (largest, most interconnected—deferred per decision #7)
+### Current Focus: Compaction Validation
+Writing tests for the compaction module to prove the distilled code works. This validates both the code and the distillation process before moving to the next component.
+
+**After validation**: Long-term Memory & Search (most isolated, different domain—tests process generalization)
 
 ---
 
@@ -102,6 +101,7 @@ Files created:
 5. **TypeScript with Rust portability** - Distill into TypeScript, but write code that converts easily to Rust. Avoid TypeScript-only tricks; verify heavy dependencies have Rust ecosystem equivalents.
 6. **Minimal viable agent** - A CLI where an agent using a Claude subscription can read and write files via tools. We'll refine this definition as we go.
 7. **No gateway for minimal scope** - Single-process CLI doesn't need inter-process communication. Design session storage and tool execution so they *could* support multi-agent later, but don't build it until needed. If/when we need multi-agent communication, prefer local-first IPC (ZeroMQ, Unix sockets) over web-oriented tech (WebSocket, HTTP). Note: ZeroMQ supports broker-less patterns (direct peer-to-peer)—a central broker may not be required at all.
+8. **Validate before advancing** - Write tests for each distilled component before moving to the next. Unvalidated foundations are risky; tests often reveal design issues early. This implements "Phase 4: Validate" from DISTILLATION.md.
 
 ---
 
@@ -134,18 +134,20 @@ Traced cross-agent communication in OpenClaw. The gateway is a WebSocket-based J
 
 ## Next Steps
 
-1. **Decide next component to distill** - Candidates:
-   - Context Management (builds on compaction work)
-   - Long-term Memory & Search (most isolated)
-   - Agent Alignment (defines agent behavior)
-   - Session Management (largest, most interconnected)
+1. **Write compaction tests** (current focus)
+   - Token estimation accuracy (within safety margin)
+   - Tool failure extraction from various message formats
+   - File operations computation (read vs modified)
+   - `InputTooLargeError` thrown at correct thresholds
+   - Successful summarization with metadata appended
+   - Edge cases: empty messages, no failures, summarizer throws
 
-2. **Consider technology choices** - The distilled system may use:
-   - Different language (Rust? Go?)
-   - Different storage (SQLite? Postgres?)
-   - Different architecture
+2. **Distill Long-term Memory & Search** (after validation)
+   - Most isolated component
+   - Different domain than compaction (tests process generalization)
+   - Clear success criteria: can embed and retrieve text
 
-3. **Establish testing strategy** - How do we validate behavioral equivalence?
+3. **Integration checkpoint** - After two components, verify they can compose toward minimal viable agent
 
 ---
 
