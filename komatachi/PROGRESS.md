@@ -6,22 +6,20 @@
 
 | Aspect | State |
 |--------|-------|
-| **Phase** | Validating distillation process via compaction tests |
-| **Last completed** | Decided on validation-first approach |
-| **Next action** | Write tests for compaction module |
+| **Phase** | Compaction validated; ready for next component |
+| **Last completed** | Compaction tests (44 tests passing) |
+| **Next action** | Distill Long-term Memory & Search |
 | **Blockers** | None |
 
 ### What Exists Now
 - [x] Scouting reports for 4 core areas (~20k LOC analyzed)
 - [x] Distillation principles documented (8 principles)
 - [x] Trial distillation: `src/compaction/` code complete
-- [ ] Compaction tests (in progress)
+- [x] Compaction tests (44 tests passing)
 - [x] Key architectural decisions (TypeScript+Rust, minimal viable agent, no gateway)
 
-### Current Focus: Compaction Validation
-Writing tests for the compaction module to prove the distilled code works. This validates both the code and the distillation process before moving to the next component.
-
-**After validation**: Long-term Memory & Search (most isolated, different domain—tests process generalization)
+### Current Focus: Next Component Selection
+Compaction is validated with 44 passing tests. The distillation process works. Next: apply it to Long-term Memory & Search (most isolated, different domain).
 
 ---
 
@@ -90,6 +88,27 @@ Files created:
 - `DISTILLATION.md` - Principles and process
 - `PROGRESS.md` - This file
 
+### 5. Compaction Validation (Complete)
+
+Added test infrastructure and comprehensive tests for the compaction module:
+
+| Aspect | Result |
+|--------|--------|
+| Test framework | Vitest (aligned with OpenClaw) |
+| Tests written | 44 |
+| Tests passing | 44 |
+| Coverage areas | Token estimation, tool failure extraction, file ops, error handling, edge cases |
+
+Key validations:
+- Token estimation accuracy with safety margin
+- InputTooLargeError thrown at correct thresholds
+- Tool failure extraction from various message formats
+- File operations computation (read vs modified)
+- Summarizer fallback when API fails
+- Edge cases: empty messages, no failures, content block arrays
+
+This validates both the distilled code and the distillation process itself.
+
 ---
 
 ## Key Decisions Made
@@ -134,18 +153,13 @@ Traced cross-agent communication in OpenClaw. The gateway is a WebSocket-based J
 
 ## Next Steps
 
-1. **Write compaction tests** (current focus)
-   - Token estimation accuracy (within safety margin)
-   - Tool failure extraction from various message formats
-   - File operations computation (read vs modified)
-   - `InputTooLargeError` thrown at correct thresholds
-   - Successful summarization with metadata appended
-   - Edge cases: empty messages, no failures, summarizer throws
+1. ~~**Write compaction tests**~~ - Done (44 tests passing)
 
-2. **Distill Long-term Memory & Search** (after validation)
+2. **Distill Long-term Memory & Search** (next)
    - Most isolated component
    - Different domain than compaction (tests process generalization)
    - Clear success criteria: can embed and retrieve text
+   - Follow same process: scout -> design -> build -> validate
 
 3. **Integration checkpoint** - After two components, verify they can compose toward minimal viable agent
 
@@ -164,14 +178,18 @@ komatachi/
 ├── CLAUDE.md           # Project context
 ├── DISTILLATION.md     # Principles and process
 ├── PROGRESS.md         # This file - update as work progresses
+├── package.json        # Dependencies (vitest, typescript)
+├── tsconfig.json       # TypeScript config
+├── vitest.config.ts    # Test runner config
 ├── scouting/           # Analysis of OpenClaw components
 │   ├── context-management.md
 │   ├── long-term-memory-search.md
 │   ├── agent-alignment.md
 │   └── session-management.md
 └── src/
-    └── compaction/     # First distilled module
+    └── compaction/     # First distilled module (validated)
         ├── index.ts
+        ├── index.test.ts   # 44 tests
         └── DECISIONS.md
 ```
 
