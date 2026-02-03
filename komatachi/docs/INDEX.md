@@ -35,6 +35,7 @@ Reference material for specific technical topics:
 
 | Guide | Purpose |
 |-------|---------|
+| [testing-strategy.md](./testing-strategy.md) | Layer-based testing approach; when to mock vs use real deps |
 | [rust-porting.md](./rust-porting.md) | Lessons from Rust portability validation; patterns for future Rust migration |
 
 ---
@@ -46,6 +47,7 @@ Each distilled module has its own DECISIONS.md:
 | Module | Decisions | Status |
 |--------|-----------|--------|
 | Compaction | [src/compaction/DECISIONS.md](../src/compaction/DECISIONS.md) | Validated (44 tests) |
+| Embeddings | [src/embeddings/DECISIONS.md](../src/embeddings/DECISIONS.md) | Validated (47 tests) |
 
 ---
 
@@ -58,6 +60,7 @@ komatachi/
 ├── DISTILLATION.md        # Core principles
 ├── docs/
 │   ├── INDEX.md           # This file
+│   ├── testing-strategy.md # Layer-based testing approach
 │   └── rust-porting.md    # Rust migration guide
 ├── scouting/              # OpenClaw analysis
 │   ├── context-management.md
@@ -65,10 +68,14 @@ komatachi/
 │   ├── agent-alignment.md
 │   └── session-management.md
 └── src/
-    └── compaction/
+    ├── compaction/
+    │   ├── index.ts
+    │   ├── index.test.ts
+    │   └── DECISIONS.md
+    └── embeddings/
         ├── index.ts
         ├── index.test.ts
-        └── DECISIONS.md   # Module-level decisions
+        └── DECISIONS.md
 ```
 
 ---

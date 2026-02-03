@@ -216,11 +216,13 @@ Each component should do one thing and trust other layers to do theirs. When a c
 
 ### Phase 4: Validate
 
-1. **Test behavioral equivalence**: Verify the distilled system produces correct results for all essential behaviors.
+1. **Test behavioral equivalence**: Verify the distilled system produces correct results for all essential behaviors. Follow the [testing strategy](docs/testing-strategy.md) for layer-appropriate test design.
 
 2. **Run in real scenarios**: Deploy alongside the old system. Compare outputs. Watch for surprises.
 
 3. **Document the decisions**: Record what was preserved, what was discarded, and why. Future maintainers will ask.
+
+4. **Review test rigor**: After writing tests, review each one asking: "Is this a free pass, or does it enforce requirements?" Use a sub-agent for unbiased review.
 
 ---
 
