@@ -250,6 +250,33 @@ Files updated:
 - `CLAUDE.md` - Komatachi vision context
 - `DISTILLATION.md` - "Why Komatachi Exists" section added
 
+### 11. Integration Verification (Complete)
+
+Traced how every component composes into the minimal viable agent loop before starting implementation. Created `docs/integration-trace.md` with:
+
+- Abstract interfaces for all 7 components (Storage, Conversation Store, Context Window, System Prompt, Tool Registry, Compaction, Agent Loop)
+- Three full turn traces: normal message, tool use with dispatch loop, compaction triggered
+- Dependency graph
+- 7 interface gaps identified and resolved
+
+**Interface gaps found and incorporated into roadmap**:
+1. Conversation Store needs `replaceTranscript()` for compaction -- added to Phase 1.2 spec
+2. Token estimation should be injected into Context Window, not imported from compaction -- updated Phase 2.1 spec
+3. Compaction's Message type doesn't match Claude API format -- flagged for Phase 4.1
+4. FileOperations not tracked by any module -- pass empty for now, noted in Phase 4.1
+5. Conversation Store needs explicit in-memory state management -- added to Phase 1.2 spec
+6. Need `estimateStringTokens()` for system prompt token counting -- noted in Phase 2.1
+7. Storage `readAllJsonl` must handle partial trailing lines from crashes -- added to Phase 1.1 spec
+
+**Verification result**: Yes, the interfaces compose into a working persistent agent loop. All gaps are solvable within planned module boundaries.
+
+Files created:
+- `docs/integration-trace.md` - Full integration verification
+
+Files updated:
+- `ROADMAP.md` - Phase 1.1, 1.2, 2.1, 4.1 specs updated with gap resolutions
+- `docs/INDEX.md` - Added integration-trace.md
+
 ## Open Questions
 
 None currently.
@@ -268,9 +295,10 @@ komatachi/
 ├── tsconfig.json       # TypeScript config
 ├── vitest.config.ts    # Test runner config
 ├── docs/               # Supplementary documentation
-│   ├── INDEX.md        # Central navigation hub
-│   ├── testing-strategy.md # Layer-based testing approach
-│   └── rust-porting.md # Rust migration guide (from validation)
+│   ├── INDEX.md              # Central navigation hub
+│   ├── integration-trace.md  # Component integration verification
+│   ├── testing-strategy.md   # Layer-based testing approach
+│   └── rust-porting.md       # Rust migration guide (from validation)
 ├── scouting/           # Analysis of OpenClaw components
 │   ├── context-management.md
 │   ├── long-term-memory-search.md

@@ -141,7 +141,8 @@ Source material: `scouting/session-management.md` (store.ts ~440 lines, transcri
 
 What to build:
 - JSON store: `read<T>(path)`, `write<T>(path, data)` with atomic write (write-to-temp, rename)
-- JSONL log: `append<T>(path, entry)`, `readAll<T>(path)`, `readRange<T>(path, start, end)`
+- JSONL log: `append<T>(path, entry)`, `readAll<T>(path)`, `readRange<T>(path, start, end)`, `writeAll<T>(path, entries)` (atomic rewrite -- needed for compaction's transcript replacement)
+- Crash resilience: `readAll<T>` must handle partial trailing lines (incomplete writes from crash mid-append). Skip the incomplete line rather than failing.
 - Base directory resolution: accept root dir as constructor/parameter, derive paths beneath it
 - Error types: `StorageNotFoundError`, `StorageCorruptionError`, `StorageIOError`
 
@@ -163,6 +164,8 @@ What to build:
 - Message appending: append Claude API messages to JSONL transcript via Storage
 - Conversation loading: read metadata + full transcript into memory on startup
 - Conversation initialization: create metadata + empty transcript if none exists
+- Transcript replacement: `replaceTranscript(messages)` atomically rewrites the JSONL transcript and updates in-memory state (required for compaction)
+- In-memory state: Conversation Store holds messages in memory after `load()`. `appendMessage()` writes to both memory and disk. `getMessages()` returns from memory (no I/O). `replaceTranscript()` replaces both. This is explicit, owned state (Principle 2).
 
 What to omit:
 - Session IDs, session keys, session listing (see Pre-Resolved Decision #2)
@@ -186,7 +189,7 @@ What to build:
 - Message selection: given messages + token budget, return the messages that fit (most recent first)
 - Overflow reporting: when messages are dropped, return metadata about what was dropped (count, estimated tokens) so the caller (Agent Loop) can decide to compact
 - Compacted history handling: a compaction summary is just another message at the start of history -- no special treatment needed, it's already in Claude API format
-- Token estimation: reuse the estimation logic from `src/compaction/` (already built)
+- Token estimation: injected as a parameter, not imported from compaction. `selectMessages(messages, budget, estimateTokens)` -- the caller (Agent Loop) passes the estimator function, keeping Context Window a pure function with zero module dependencies. A shared `estimateStringTokens(text): number` utility should also exist (same formula) for Agent Loop to estimate system prompt size when computing the token budget.
 
 What to omit:
 - Token budget computation (caller's job -- Agent Loop knows the model's context limit, system prompt size, response reserve)
@@ -262,6 +265,8 @@ What to build:
 - Main loop: read input -> build context (system prompt + history within budget) -> call Claude API -> handle response (text, tool calls) -> append to conversation -> repeat
 - Tool execution dispatch: when Claude returns tool_use, execute the handler from the Tool Registry, format as tool_result, append both to conversation, call Claude again. Simple sequential loop.
 - Compaction triggering: when Context Window reports overflow (messages dropped), trigger compaction via the existing `src/compaction/` module. Simplest policy: compact when any messages are dropped.
+- Compaction type alignment: the existing compaction module uses its own Message type (trial distillation, pre-decision #13). Update it to accept Claude API message format when wiring into the Agent Loop. `extractToolFailures()` needs updating to find tool_result blocks in user messages instead of a "toolResult" role.
+- FileOperations: compaction accepts file operation data (files read/modified). No module currently tracks this. Pass empty file operations for now -- compaction still works, it just won't include file lists in summaries. Add tracking when tools report file operations.
 - Error handling: surface Claude API errors to the caller. No retries beyond what the SDK provides. Fail clearly (Principle 7).
 - Graceful shutdown: persist conversation state on exit
 
