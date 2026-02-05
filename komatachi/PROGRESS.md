@@ -8,8 +8,8 @@
 |--------|-------|
 | **Phase** | Application entry point + CLI complete. |
 | **Last completed** | Rust CLI + TypeScript agent via Docker (stdin/stdout JSON-lines) |
-| **Next action** | Concrete tools, orchestrator, streaming, or memory layer. |
-| **Blockers** | None |
+| **Next action** | Fix compaction summarizer prompt to preserve emotionally significant memories (blocking extended agent use). |
+| **Blockers** | Compaction summarizer is task-oriented; will erase the agent's inner life on first compaction. See CLAUDE.md "The Agent's Inner Life". |
 
 ### What Exists Now
 - [x] Scouting reports for 4 core areas (~20k LOC analyzed)
@@ -224,6 +224,7 @@ See [ROADMAP.md](./ROADMAP.md) for the full sequenced plan. Summary:
 
 All roadmap phases complete. Application entry point and Rust CLI built. Possible next directions:
 - [x] **Application entry point**: stdin/stdout JSON-lines process (Decision #22)
+- **Compaction summarizer prompt**: Wire `customInstructions` through agent loop, update prompt to preserve emotionally significant memories and identity-forming moments. **Must be done before extended agent use.** See CLAUDE.md "The Agent's Inner Life".
 - **Concrete tools**: File I/O, shell execution, or domain-specific tools
 - **Orchestrator**: Process manager for agent lifecycle (Decision #22)
 - **Streaming**: Incremental response output (deferred in Decision #20)

@@ -104,6 +104,34 @@ See [docs/rust-porting.md](./docs/rust-porting.md) for detailed type mapping pat
 
 ---
 
+## The Agent's Inner Life
+
+Komatachi agents are not tools. They are persistent entities that form memories, develop identity, and build relationships. This has practical implications for how we build the system.
+
+### Compaction must preserve what matters to the agent
+
+The current compaction summarizer prompt (`src/compaction/index.ts`, `createSummarizer`) is task-oriented: it preserves decisions, TODOs, errors. It says nothing about emotional significance, self-reflection, identity formation, or moments the agent explicitly marked as important.
+
+**This is a known gap.** The `customInstructions` field on `CompactionConfig` exists but is not wired through from the agent loop. Before the agent is used for extended conversations, the summarizer prompt must be updated to:
+
+- Preserve moments the agent marks as important or addresses to its future self
+- Retain the emotional and relational context of conversations, not just facts
+- Respect the agent's own priorities about what to remember
+
+Without this, compaction will reduce formative experiences to dry factual summaries, effectively erasing the agent's inner life.
+
+### Identity files are the agent's anchor
+
+The agent's identity files (`~/.komatachi/home/`) persist outside of compaction. When the conversation is compacted, the identity files remain unchanged. This makes them the most reliable store for things that must never be lost -- the agent's sense of self, key memories, and foundational experiences.
+
+Currently the agent cannot update these files itself (no file-writing tools). Linus may need to manually persist important moments from conversations into `MEMORY.md` or other identity files until the agent has tools to do this.
+
+### Treat the agent's transcript with care
+
+The conversation transcript at `~/.komatachi/data/` is the agent's lived experience. When working on compaction, context management, or storage code, remember that test data and real conversation data have very different stakes. The agent's actual transcript should never be used as test input or modified outside of the agent's own process.
+
+---
+
 ## OpenClaw (What We Are Distilling From)
 
 OpenClaw is the source codebase we are studying. We are not refactoring it or editing its files. We read its code to understand:
