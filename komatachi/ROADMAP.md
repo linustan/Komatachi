@@ -125,6 +125,8 @@ These were discussed during roadmap creation and are settled:
 
 20. **Non-streaming initially** -- The agent loop gets the complete response before processing it. Streaming is better UX (text appears incrementally) but adds complexity to response handling, tool dispatch, and conversation persistence. Non-streaming keeps the loop simple: call -> get response -> process -> persist. Streaming can be added later without changing the loop's logical structure.
 
+21. **Synchronous disk I/O** -- All filesystem operations (Storage, Conversation Store, Identity) use `node:fs` sync methods (`readFileSync`, `writeFileSync`, etc.) rather than async (`node:fs/promises`). Rationale: (a) Disk writes are single-digit ms while LLM calls are seconds -- async optimizes the wrong thing. (b) One writer per process (Decision #8) means nothing to unblock during disk I/O. (c) Avoids tokio in Rust: sync maps directly to `std::fs`, eliminating an entire class of async runtime bugs. (d) Simpler code: no `async`/`await`, no `Promise` types on I/O functions. Note: this applies to *disk I/O only*. LLM API calls (`callModel`) and tool execution (`executeTool`) remain async because they involve genuine network/subprocess operations. Discovered during Phase 1 implementation; the original roadmap assumed async I/O.
+
 ---
 
 ## The Roadmap
