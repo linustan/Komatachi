@@ -6,9 +6,9 @@
 
 | Aspect | State |
 |--------|-------|
-| **Phase** | Decision resolution complete. Ready for Phase 1 implementation. |
-| **Last completed** | Per-module decision resolution (20 pre-resolved decisions in ROADMAP.md) |
-| **Next action** | Begin Phase 1.1 -- Storage module implementation |
+| **Phase** | Phase 3 complete. Ready for Phase 4 implementation. |
+| **Last completed** | Phase 3: Agent Identity (System Prompt + Tool Registry) |
+| **Next action** | Begin Phase 4.1 -- Agent Loop implementation |
 | **Blockers** | None |
 
 ### What Exists Now
@@ -19,9 +19,14 @@
 - [x] Key architectural decisions (TypeScript+Rust, minimal viable agent, no gateway)
 - [x] Phased roadmap with autonomous execution framework (ROADMAP.md)
 - [x] Per-module decision resolution (20 pre-resolved decisions)
+- [x] Storage module: `src/storage/` (49 tests)
+- [x] Conversation Store module: `src/conversation/` (41 tests)
+- [x] Context Window module: `src/context/` (24 tests)
+- [x] System Prompt module: `src/identity/` (28 tests)
+- [x] Tool Registry module: `src/tools/` (17 tests)
 
-### Current Focus: Phase 1 Implementation
-All decision points have been resolved. The roadmap (ROADMAP.md) contains 20 pre-resolved decisions covering every phase. Claude can now execute the distillation cycle autonomously, following the session protocol. Next: Phase 1.1 -- Storage module.
+### Current Focus: Phase 4 Implementation
+Phases 1-3 complete. All component modules are built. Next: Phase 4 -- Agent Loop (main execution loop wiring everything together with Claude API).
 
 ---
 
@@ -204,9 +209,9 @@ Traced cross-agent communication in OpenClaw. The gateway is a WebSocket-based J
 
 See [ROADMAP.md](./ROADMAP.md) for the full sequenced plan. Summary:
 
-- [ ] **Phase 1**: Storage & Conversation Foundation (Storage, Conversation Store)
-- [ ] **Phase 2**: Context Pipeline (Context Window with History Management folded in)
-- [ ] **Phase 3**: Agent Identity (System Prompt with identity loading, Tool Registry)
+- [x] **Phase 1**: Storage & Conversation Foundation (Storage, Conversation Store)
+- [x] **Phase 2**: Context Pipeline (Context Window with History Management folded in)
+- [x] **Phase 3**: Agent Identity (System Prompt with identity loading, Tool Registry)
 - [ ] **Phase 4**: Agent Loop (main execution loop wiring everything together)
 - [ ] **Phase 5**: Integration Validation (end-to-end pipeline test)
 
@@ -277,6 +282,192 @@ Files updated:
 - `ROADMAP.md` - Phase 1.1, 1.2, 2.1, 4.1 specs updated with gap resolutions
 - `docs/INDEX.md` - Added integration-trace.md
 
+### 12. Phase 1.1: Storage Module (Complete)
+
+Distilled generic file-based persistence primitives from OpenClaw's session store:
+
+| Metric | OpenClaw | Distilled |
+|--------|----------|-----------|
+| Lines of code (store + transcript + paths + locks) | ~834 | ~196 |
+| File locking | Advisory locks (188 LOC) | None (one writer per process) |
+| Caching | TTL + mtime invalidation | None (consumer's responsibility) |
+| Path resolution | Session key + agent ID derivation | Base directory + relative paths |
+| Domain awareness | Session-specific CRUD | Generic JSON/JSONL primitives |
+
+**What was built**:
+- JSON read/write with atomic operations (write-to-temp, rename)
+- JSONL append-only logs with crash-resilient reading (partial trailing line handling)
+- JSONL atomic rewrite (for compaction transcript replacement)
+- JSONL range reading
+- Three specific error types: `StorageNotFoundError`, `StorageCorruptionError`, `StorageIOError`
+- 49 tests covering all operations, crash resilience, round-trips, edge cases
+
+**Key decisions**:
+- Factory function pattern (`createStorage(baseDir)`) consistent with existing modules
+- Auto-create parent directories on write, not on read
+- Partial trailing JSONL lines from crashes silently skipped; corrupt non-trailing lines throw
+- `readRangeJsonl` implemented naively (read-all + slice) -- adequate with compaction keeping transcripts manageable
+
+**Deviation from plan**: Added `@types/node` as a devDependency. Storage is the first module to use Node.js filesystem APIs; previous modules (compaction, embeddings) are pure TypeScript.
+
+Files created:
+- `src/storage/index.ts` - Storage interface + implementation
+- `src/storage/index.test.ts` - 49 tests
+- `src/storage/DECISIONS.md` - Architectural decision record
+
+### 13. Phase 1.2: Conversation Store Module (Complete)
+
+Distilled conversation persistence from OpenClaw's session management:
+
+| Metric | OpenClaw | Distilled |
+|--------|----------|-----------|
+| Lines of code (store + types + reset + metadata) | ~871 | ~188 |
+| Session multiplexing | Multi-session per process | One conversation per agent |
+| Session keys | Agent-prefixed compound keys | None (directory path) |
+| Lifecycle | State machine with reset policies | Exists or doesn't |
+| Message types | Provider-agnostic format | Claude API format directly |
+
+**What was built**:
+- `ConversationStore` interface with `load()`, `initialize()`, `appendMessage()`, `getMessages()`, `getMetadata()`, `replaceTranscript()`, `updateMetadata()`
+- Claude API message types: `Message`, `TextBlock`, `ToolUseBlock`, `ToolResultBlock`, `ContentBlock`
+- `ConversationMetadata` with timestamps, compaction count, model
+- In-memory state management: loaded on `load()`, synced to disk on writes, served from memory on reads
+- Error types: `ConversationNotLoadedError`, `ConversationAlreadyExistsError`
+- 41 tests covering initialization, loading, appending, compaction (replaceTranscript), metadata updates, full lifecycle, tool use round-trips, edge cases
+
+**Key decisions**:
+- Messages use Claude API format directly (Decision #13): `{ role: "user" | "assistant", content: string | ContentBlock[] }`
+- `initialize()` is explicit, not implicit -- conversation must be explicitly created before use
+- `replaceTranscript()` makes defensive copies (ownership semantics, Rust-compatible)
+- `updateMetadata()` restricts updatable fields to prevent accidental corruption of immutable fields like `createdAt`
+- Tests use real Storage implementation (not mocks) per testing strategy for orchestration layers
+
+**Interface gaps resolved**:
+- Gap #1 from integration trace: `replaceTranscript()` implemented
+- Gap #5 from integration trace: In-memory state with `ConversationNotLoadedError` guard
+
+Files created:
+- `src/conversation/index.ts` - ConversationStore interface + implementation + message types
+- `src/conversation/index.test.ts` - 41 tests
+- `src/conversation/DECISIONS.md` - Architectural decision record
+
+### 14. Phase 2.1: Context Window Module (Complete)
+
+Distilled context window management from OpenClaw's context management system:
+
+| Metric | OpenClaw | Distilled |
+|--------|----------|-----------|
+| Lines of code (context + pruning + history + guard) | ~915 | ~90 |
+| Pruning subsystem | Soft trim, hard clear, TTL, tool matching (553 LOC) | None (compaction handles size) |
+| History limiting | Per-session turn limits (85 LOC) | None (token budget is the policy) |
+| Model registry | Context window lookup (38 LOC) | None (caller provides budget) |
+| Dependencies | Multiple modules | Zero (pure function) |
+
+**What was built**:
+- `selectMessages<T>()` -- generic pure function, selects most-recent contiguous block within token budget
+- `OverflowReport` -- count and estimated tokens of dropped messages
+- `estimateStringTokens()` -- utility for Agent Loop to estimate system prompt token count
+- 24 tests covering selection logic, overflow reporting, edge cases, generic type usage
+
+**Key decisions**:
+- Generic type parameter `<T>` instead of importing Message type -- zero module dependencies
+- Token estimation injected as parameter, not imported from compaction (resolves integration trace Gap #2)
+- `estimateStringTokens` co-located here for Agent Loop's budget computation (resolves integration trace Gap #6)
+- Contiguous selection from end only -- no skipping messages to preserve conversation coherence
+- Empty selection is valid (Agent Loop handles force-include policy)
+
+Files created:
+- `src/context/index.ts` - selectMessages + estimateStringTokens
+- `src/context/index.test.ts` - 24 tests
+- `src/context/DECISIONS.md` - Architectural decision record
+
+### 15. Phase 3.1: System Prompt Module (Complete)
+
+Distilled system prompt assembly from OpenClaw's agent alignment system:
+
+| Metric | OpenClaw | Distilled |
+|--------|----------|-----------|
+| Lines of code (system-prompt + workspace) | ~879 | ~171 |
+| Section registration | Dynamic registry with add/replace | Fixed ordered list |
+| Plugin hooks | Yes | None |
+| Template engine | Partial | Template literals only |
+| Project detection | Yes (288 LOC) | None (deferred) |
+
+**What was built**:
+- `loadIdentityFiles(homeDir)` -- reads SOUL.md, IDENTITY.md, USER.md, MEMORY.md, AGENTS.md, TOOLS.md
+- `buildSystemPrompt(identityFiles, tools, runtime)` -- assembles system prompt from sections
+- `ToolSummary` type for prompt rendering (decoupled from full ToolDefinition)
+- 28 tests covering file loading, section building, ordering, integration
+
+**Key decisions**:
+- Module named `identity/` not `system-prompt/` -- reflects the agent's sense of self
+- Missing identity files return null (not error) -- agent starts minimal and grows
+- `loadIdentityFiles` reads filesystem directly, not through Storage -- identity files are user-edited
+- `ToolSummary` instead of `ToolDefinition` keeps identity module independent of tools module
+- Fixed section order: identity, tools, runtime, memory, guidelines
+
+Files created:
+- `src/identity/index.ts` - loadIdentityFiles + buildSystemPrompt
+- `src/identity/index.test.ts` - 28 tests
+- `src/identity/DECISIONS.md` - Architectural decision record
+
+### 16. Phase 3.2: Tool Registry Module (Complete)
+
+Distilled tool management from OpenClaw's tool policy system:
+
+| Metric | OpenClaw | Distilled |
+|--------|----------|-----------|
+| Lines of code (tool-policy + types.tools) | ~684 | ~106 |
+| Tool organization | Groups + profiles + allow/deny | Flat array |
+| Permissions | Channel/user/agent gating | None (array is policy) |
+| Dynamic enabling | Yes | No |
+| Plugin discovery | Yes | No |
+
+**What was built**:
+- `ToolDefinition` -- name, description, input schema, handler
+- `ToolResult` -- discriminated union: `{ ok: true, content }` or `{ ok: false, error }`
+- `exportForApi()` -- strips handlers, maps to Claude API tool format
+- `findTool()` -- lookup by name
+- `executeTool()` -- wraps handler exceptions as error results
+- 17 tests covering API export, tool lookup, execution, error handling
+
+**Key decisions**:
+- Flat array, no registry class -- functions operate on the array directly
+- `executeTool` catches handler exceptions, always returns structured ToolResult
+- `JsonSchema` type is minimal subset sufficient for Claude API
+- `inputSchema` (camelCase) mapped to `input_schema` (snake_case) in API export
+
+Files created:
+- `src/tools/index.ts` - ToolDefinition + ToolResult + utility functions
+- `src/tools/index.test.ts` - 17 tests
+- `src/tools/DECISIONS.md` - Architectural decision record
+
+### 17. Synchronous I/O Conversion (Complete)
+
+Converted Storage, Conversation Store, and Identity modules from async (`node:fs/promises`) to sync (`node:fs`) filesystem operations.
+
+**Rationale**:
+- Disk writes are single-digit ms; LLM API calls are seconds. Async I/O optimizes the wrong thing.
+- One writer per process (Decision #9) means nothing to unblock during disk I/O.
+- Avoids tokio in Rust: sync maps directly to `std::fs`, eliminating an entire class of async runtime bugs.
+- Simpler code: no `async`/`await`, no `Promise` types, every function returns directly.
+
+**What changed**:
+- `Storage` interface: all methods return `T`/`void` instead of `Promise<T>`/`Promise<void>`
+- `ConversationStore` interface: `load()`, `initialize()`, `appendMessage()`, `replaceTranscript()`, `updateMetadata()` all synchronous
+- `loadIdentityFiles()`: synchronous (`readFileSync`)
+- All tests converted: sync setup/teardown (`mkdtempSync`/`rmSync`), sync assertions (no `await`, no `rejects.toThrow()`)
+- `executeTool()` in Tool Registry stays async (tool handlers genuinely involve subprocess/network)
+
+**Test results**: 250 tests passing, type-check clean.
+
+**Deviation from original plan**: The roadmap assumed async I/O. Analysis of the one-agent-per-process architecture showed sync is strictly better for this use case.
+
+Files updated:
+- `src/storage/index.ts`, `src/storage/index.test.ts`, `src/storage/DECISIONS.md`
+- `src/conversation/index.ts`, `src/conversation/index.test.ts`, `src/conversation/DECISIONS.md`
+- `src/identity/index.ts`, `src/identity/index.test.ts`, `src/identity/DECISIONS.md`
+
 ## Open Questions
 
 None currently.
@@ -291,7 +482,7 @@ komatachi/
 ├── PROGRESS.md         # This file - update as work progresses
 ├── ROADMAP.md          # Phased plan, decision authority, session protocol
 ├── DISTILLATION.md     # Principles and process
-├── package.json        # Dependencies (vitest, typescript)
+├── package.json        # Dependencies (vitest, typescript, @types/node)
 ├── tsconfig.json       # TypeScript config
 ├── vitest.config.ts    # Test runner config
 ├── docs/               # Supplementary documentation
@@ -305,13 +496,33 @@ komatachi/
 │   ├── agent-alignment.md
 │   └── session-management.md
 └── src/
-    ├── compaction/     # First distilled module (validated)
+    ├── compaction/     # Trial distillation (validated)
     │   ├── index.ts
     │   ├── index.test.ts   # 44 tests
     │   └── DECISIONS.md
-    └── embeddings/     # Second distilled module (validated)
-        ├── index.ts        # Provider interface + OpenAI + utilities
-        ├── index.test.ts   # 47 tests
+    ├── embeddings/     # Embeddings sub-module (validated)
+    │   ├── index.ts        # Provider interface + OpenAI + utilities
+    │   ├── index.test.ts   # 47 tests
+    │   └── DECISIONS.md
+    ├── storage/        # Phase 1.1: Generic file-based persistence
+    │   ├── index.ts        # Storage interface + createStorage()
+    │   ├── index.test.ts   # 49 tests
+    │   └── DECISIONS.md
+    ├── conversation/   # Phase 1.2: Conversation persistence
+    │   ├── index.ts        # ConversationStore + Claude API message types
+    │   ├── index.test.ts   # 41 tests
+    │   └── DECISIONS.md
+    ├── context/        # Phase 2.1: Context window management
+    │   ├── index.ts        # selectMessages + estimateStringTokens
+    │   ├── index.test.ts   # 24 tests
+    │   └── DECISIONS.md
+    ├── identity/       # Phase 3.1: System prompt / agent identity
+    │   ├── index.ts        # loadIdentityFiles + buildSystemPrompt
+    │   ├── index.test.ts   # 28 tests
+    │   └── DECISIONS.md
+    └── tools/          # Phase 3.2: Tool registry
+        ├── index.ts        # ToolDefinition + exportForApi + executeTool
+        ├── index.test.ts   # 17 tests
         └── DECISIONS.md
 ```
 
