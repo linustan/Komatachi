@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStorage, type Storage } from "../storage/index.js";
@@ -18,13 +18,13 @@ import {
 let testDir: string;
 let storage: Storage;
 
-beforeEach(async () => {
-  testDir = await mkdtemp(join(tmpdir(), "komatachi-conversation-test-"));
+beforeEach(() => {
+  testDir = mkdtempSync(join(tmpdir(), "komatachi-conversation-test-"));
   storage = createStorage(testDir);
 });
 
-afterEach(async () => {
-  await rm(testDir, { recursive: true, force: true });
+afterEach(() => {
+  rmSync(testDir, { recursive: true, force: true });
 });
 
 function userMessage(text: string): Message {
@@ -35,17 +35,17 @@ function assistantMessage(text: string): Message {
   return { role: "assistant", content: text };
 }
 
-async function initAndLoad(
+function initAndLoad(
   store: ConversationStore,
   model?: string
-): Promise<void> {
-  await store.initialize(model);
-  await store.load();
+): void {
+  store.initialize(model);
+  store.load();
 }
 
 // Read raw file content from test directory
-async function readRaw(path: string): Promise<string> {
-  return readFile(join(testDir, path), "utf-8");
+function readRaw(path: string): string {
+  return readFileSync(join(testDir, path), "utf-8");
 }
 
 // -----------------------------------------------------------------------------
@@ -53,45 +53,45 @@ async function readRaw(path: string): Promise<string> {
 // -----------------------------------------------------------------------------
 
 describe("initialize", () => {
-  it("creates metadata and empty transcript", async () => {
+  it("creates metadata and empty transcript", () => {
     const store = createConversationStore(storage, "agent");
 
-    await store.initialize();
+    store.initialize();
 
-    const metaRaw = await readRaw("agent/metadata.json");
+    const metaRaw = readRaw("agent/metadata.json");
     const meta = JSON.parse(metaRaw);
     expect(meta.createdAt).toBeTypeOf("number");
     expect(meta.updatedAt).toBeTypeOf("number");
     expect(meta.compactionCount).toBe(0);
     expect(meta.model).toBeNull();
 
-    const transcriptRaw = await readRaw("agent/transcript.jsonl");
+    const transcriptRaw = readRaw("agent/transcript.jsonl");
     expect(transcriptRaw).toBe("");
   });
 
-  it("creates metadata with model when provided", async () => {
+  it("creates metadata with model when provided", () => {
     const store = createConversationStore(storage, "agent");
 
-    await store.initialize("claude-sonnet-4-20250514");
+    store.initialize("claude-sonnet-4-20250514");
 
-    const meta = await storage.readJson<{ model: string }>(
+    const meta = storage.readJson<{ model: string }>(
       "agent/metadata.json"
     );
     expect(meta.model).toBe("claude-sonnet-4-20250514");
   });
 
-  it("throws ConversationAlreadyExistsError if conversation exists", async () => {
+  it("throws ConversationAlreadyExistsError if conversation exists", () => {
     const store = createConversationStore(storage, "agent");
-    await store.initialize();
+    store.initialize();
 
-    await expect(store.initialize()).rejects.toThrow(
+    expect(() => store.initialize()).toThrow(
       ConversationAlreadyExistsError
     );
   });
 
-  it("sets in-memory state after initialization", async () => {
+  it("sets in-memory state after initialization", () => {
     const store = createConversationStore(storage, "agent");
-    await store.initialize();
+    store.initialize();
 
     // After initialize, state is loaded -- getMessages/getMetadata should work
     expect(store.getMessages()).toEqual([]);
@@ -104,17 +104,17 @@ describe("initialize", () => {
 // -----------------------------------------------------------------------------
 
 describe("load", () => {
-  it("loads metadata and transcript from disk", async () => {
+  it("loads metadata and transcript from disk", () => {
     const store = createConversationStore(storage, "agent");
-    await store.initialize();
+    store.initialize();
 
     // Append some messages
-    await store.appendMessage(userMessage("Hello"));
-    await store.appendMessage(assistantMessage("Hi there"));
+    store.appendMessage(userMessage("Hello"));
+    store.appendMessage(assistantMessage("Hi there"));
 
     // Create a fresh store and load
     const freshStore = createConversationStore(storage, "agent");
-    const state = await freshStore.load();
+    const state = freshStore.load();
 
     expect(state.metadata.compactionCount).toBe(0);
     expect(state.messages).toHaveLength(2);
@@ -122,21 +122,21 @@ describe("load", () => {
     expect(state.messages[1]).toEqual(assistantMessage("Hi there"));
   });
 
-  it("returns the loaded state", async () => {
+  it("returns the loaded state", () => {
     const store = createConversationStore(storage, "agent");
-    await store.initialize("claude-sonnet-4-20250514");
+    store.initialize("claude-sonnet-4-20250514");
 
     const freshStore = createConversationStore(storage, "agent");
-    const state = await freshStore.load();
+    const state = freshStore.load();
 
     expect(state.metadata.model).toBe("claude-sonnet-4-20250514");
     expect(state.messages).toEqual([]);
   });
 
-  it("throws when metadata file is missing", async () => {
+  it("throws when metadata file is missing", () => {
     const store = createConversationStore(storage, "nonexistent");
 
-    await expect(store.load()).rejects.toThrow();
+    expect(() => store.load()).toThrow();
   });
 });
 
@@ -157,28 +157,28 @@ describe("pre-load access", () => {
     expect(() => store.getMetadata()).toThrow(ConversationNotLoadedError);
   });
 
-  it("throws ConversationNotLoadedError for appendMessage before load", async () => {
+  it("throws ConversationNotLoadedError for appendMessage before load", () => {
     const store = createConversationStore(storage, "agent");
 
-    await expect(
+    expect(() =>
       store.appendMessage(userMessage("test"))
-    ).rejects.toThrow(ConversationNotLoadedError);
+    ).toThrow(ConversationNotLoadedError);
   });
 
-  it("throws ConversationNotLoadedError for replaceTranscript before load", async () => {
+  it("throws ConversationNotLoadedError for replaceTranscript before load", () => {
     const store = createConversationStore(storage, "agent");
 
-    await expect(store.replaceTranscript([])).rejects.toThrow(
+    expect(() => store.replaceTranscript([])).toThrow(
       ConversationNotLoadedError
     );
   });
 
-  it("throws ConversationNotLoadedError for updateMetadata before load", async () => {
+  it("throws ConversationNotLoadedError for updateMetadata before load", () => {
     const store = createConversationStore(storage, "agent");
 
-    await expect(
+    expect(() =>
       store.updateMetadata({ compactionCount: 1 })
-    ).rejects.toThrow(ConversationNotLoadedError);
+    ).toThrow(ConversationNotLoadedError);
   });
 });
 
@@ -187,40 +187,40 @@ describe("pre-load access", () => {
 // -----------------------------------------------------------------------------
 
 describe("appendMessage", () => {
-  it("appends a user message to memory and disk", async () => {
+  it("appends a user message to memory and disk", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
-    await store.appendMessage(userMessage("Hello"));
+    store.appendMessage(userMessage("Hello"));
 
     // In-memory
     expect(store.getMessages()).toHaveLength(1);
     expect(store.getMessages()[0]).toEqual(userMessage("Hello"));
 
     // On disk
-    const entries = await storage.readAllJsonl<Message>(
+    const entries = storage.readAllJsonl<Message>(
       "agent/transcript.jsonl"
     );
     expect(entries).toHaveLength(1);
     expect(entries[0]).toEqual(userMessage("Hello"));
   });
 
-  it("appends an assistant message", async () => {
+  it("appends an assistant message", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
-    await store.appendMessage(assistantMessage("Hi there"));
+    store.appendMessage(assistantMessage("Hi there"));
 
     expect(store.getMessages()).toEqual([assistantMessage("Hi there")]);
   });
 
-  it("preserves message order across multiple appends", async () => {
+  it("preserves message order across multiple appends", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
-    await store.appendMessage(userMessage("First"));
-    await store.appendMessage(assistantMessage("Second"));
-    await store.appendMessage(userMessage("Third"));
+    store.appendMessage(userMessage("First"));
+    store.appendMessage(assistantMessage("Second"));
+    store.appendMessage(userMessage("Third"));
 
     const messages = store.getMessages();
     expect(messages).toHaveLength(3);
@@ -229,24 +229,22 @@ describe("appendMessage", () => {
     expect(messages[2].content).toBe("Third");
   });
 
-  it("updates metadata timestamp on append", async () => {
+  it("updates metadata timestamp on append", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
     const beforeAppend = store.getMetadata().updatedAt;
 
-    // Small delay to ensure timestamp difference
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    await store.appendMessage(userMessage("Hello"));
+    store.appendMessage(userMessage("Hello"));
 
     expect(store.getMetadata().updatedAt).toBeGreaterThanOrEqual(
       beforeAppend
     );
   });
 
-  it("handles messages with content block arrays", async () => {
+  it("handles messages with content block arrays", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
     const toolUseMessage: Message = {
       role: "assistant",
@@ -261,19 +259,19 @@ describe("appendMessage", () => {
       ],
     };
 
-    await store.appendMessage(toolUseMessage);
+    store.appendMessage(toolUseMessage);
 
     expect(store.getMessages()[0]).toEqual(toolUseMessage);
 
     // Verify round-trip through disk
     const freshStore = createConversationStore(storage, "agent");
-    const state = await freshStore.load();
+    const state = freshStore.load();
     expect(state.messages[0]).toEqual(toolUseMessage);
   });
 
-  it("handles tool result messages", async () => {
+  it("handles tool result messages", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
     const toolResultMessage: Message = {
       role: "user",
@@ -286,7 +284,7 @@ describe("appendMessage", () => {
       ],
     };
 
-    await store.appendMessage(toolResultMessage);
+    store.appendMessage(toolResultMessage);
 
     expect(store.getMessages()[0]).toEqual(toolResultMessage);
   });
@@ -297,15 +295,15 @@ describe("appendMessage", () => {
 // -----------------------------------------------------------------------------
 
 describe("replaceTranscript", () => {
-  it("replaces the entire transcript in memory and on disk", async () => {
+  it("replaces the entire transcript in memory and on disk", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
     // Build up a conversation
-    await store.appendMessage(userMessage("msg 1"));
-    await store.appendMessage(assistantMessage("msg 2"));
-    await store.appendMessage(userMessage("msg 3"));
-    await store.appendMessage(assistantMessage("msg 4"));
+    store.appendMessage(userMessage("msg 1"));
+    store.appendMessage(assistantMessage("msg 2"));
+    store.appendMessage(userMessage("msg 3"));
+    store.appendMessage(assistantMessage("msg 4"));
 
     expect(store.getMessages()).toHaveLength(4);
 
@@ -316,7 +314,7 @@ describe("replaceTranscript", () => {
       assistantMessage("msg 4"),
     ];
 
-    await store.replaceTranscript(compacted);
+    store.replaceTranscript(compacted);
 
     // In-memory
     expect(store.getMessages()).toHaveLength(3);
@@ -325,46 +323,45 @@ describe("replaceTranscript", () => {
     );
 
     // On disk
-    const entries = await storage.readAllJsonl<Message>(
+    const entries = storage.readAllJsonl<Message>(
       "agent/transcript.jsonl"
     );
     expect(entries).toHaveLength(3);
   });
 
-  it("can replace with empty transcript", async () => {
+  it("can replace with empty transcript", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
-    await store.appendMessage(userMessage("Hello"));
-    await store.replaceTranscript([]);
+    store.appendMessage(userMessage("Hello"));
+    store.replaceTranscript([]);
 
     expect(store.getMessages()).toHaveLength(0);
   });
 
-  it("updates metadata timestamp", async () => {
+  it("updates metadata timestamp", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
-    await store.appendMessage(userMessage("Hello"));
+    store.appendMessage(userMessage("Hello"));
     const before = store.getMetadata().updatedAt;
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    await store.replaceTranscript([userMessage("Summary")]);
+    store.replaceTranscript([userMessage("Summary")]);
 
     expect(store.getMetadata().updatedAt).toBeGreaterThanOrEqual(before);
   });
 
-  it("replaced transcript persists across reload", async () => {
+  it("replaced transcript persists across reload", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
-    await store.appendMessage(userMessage("old 1"));
-    await store.appendMessage(userMessage("old 2"));
-    await store.replaceTranscript([userMessage("compacted")]);
+    store.appendMessage(userMessage("old 1"));
+    store.appendMessage(userMessage("old 2"));
+    store.replaceTranscript([userMessage("compacted")]);
 
     // Reload from disk
     const freshStore = createConversationStore(storage, "agent");
-    const state = await freshStore.load();
+    const state = freshStore.load();
 
     expect(state.messages).toHaveLength(1);
     expect(state.messages[0].content).toBe("compacted");
@@ -376,58 +373,57 @@ describe("replaceTranscript", () => {
 // -----------------------------------------------------------------------------
 
 describe("updateMetadata", () => {
-  it("updates compaction count", async () => {
+  it("updates compaction count", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
-    await store.updateMetadata({ compactionCount: 1 });
+    store.updateMetadata({ compactionCount: 1 });
 
     expect(store.getMetadata().compactionCount).toBe(1);
   });
 
-  it("updates model", async () => {
+  it("updates model", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
-    await store.updateMetadata({ model: "claude-opus-4-20250514" });
+    store.updateMetadata({ model: "claude-opus-4-20250514" });
 
     expect(store.getMetadata().model).toBe("claude-opus-4-20250514");
   });
 
-  it("preserves other fields when updating a single field", async () => {
+  it("preserves other fields when updating a single field", () => {
     const store = createConversationStore(storage, "agent");
-    await store.initialize("claude-sonnet-4-20250514");
-    await store.load();
+    store.initialize("claude-sonnet-4-20250514");
+    store.load();
 
     const originalCreatedAt = store.getMetadata().createdAt;
 
-    await store.updateMetadata({ compactionCount: 5 });
+    store.updateMetadata({ compactionCount: 5 });
 
     expect(store.getMetadata().createdAt).toBe(originalCreatedAt);
     expect(store.getMetadata().model).toBe("claude-sonnet-4-20250514");
     expect(store.getMetadata().compactionCount).toBe(5);
   });
 
-  it("persists to disk", async () => {
+  it("persists to disk", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
-    await store.updateMetadata({ compactionCount: 3 });
+    store.updateMetadata({ compactionCount: 3 });
 
     const freshStore = createConversationStore(storage, "agent");
-    const state = await freshStore.load();
+    const state = freshStore.load();
 
     expect(state.metadata.compactionCount).toBe(3);
   });
 
-  it("updates timestamp", async () => {
+  it("updates timestamp", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
     const before = store.getMetadata().updatedAt;
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    await store.updateMetadata({ compactionCount: 1 });
+    store.updateMetadata({ compactionCount: 1 });
 
     expect(store.getMetadata().updatedAt).toBeGreaterThanOrEqual(before);
   });
@@ -438,29 +434,29 @@ describe("updateMetadata", () => {
 // -----------------------------------------------------------------------------
 
 describe("getMessages", () => {
-  it("returns empty array for new conversation", async () => {
+  it("returns empty array for new conversation", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
     expect(store.getMessages()).toEqual([]);
   });
 
-  it("returns messages without disk I/O", async () => {
+  it("returns messages without disk I/O", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
-    await store.appendMessage(userMessage("Hello"));
+    store.appendMessage(userMessage("Hello"));
 
     // getMessages is synchronous -- no disk I/O
     const messages = store.getMessages();
     expect(messages).toHaveLength(1);
   });
 
-  it("returns readonly array", async () => {
+  it("returns readonly array", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
-    await store.appendMessage(userMessage("Hello"));
+    store.appendMessage(userMessage("Hello"));
     const messages = store.getMessages();
 
     // TypeScript enforces this at compile time; runtime check for safety
@@ -469,9 +465,9 @@ describe("getMessages", () => {
 });
 
 describe("getMetadata", () => {
-  it("returns initial metadata after initialization", async () => {
+  it("returns initial metadata after initialization", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
     const meta = store.getMetadata();
     expect(meta.compactionCount).toBe(0);
@@ -486,40 +482,40 @@ describe("getMetadata", () => {
 // -----------------------------------------------------------------------------
 
 describe("full lifecycle", () => {
-  it("initialize -> load -> append -> reload preserves everything", async () => {
+  it("initialize -> load -> append -> reload preserves everything", () => {
     // Initialize
     const store1 = createConversationStore(storage, "agent");
-    await store1.initialize("claude-sonnet-4-20250514");
-    await store1.load();
+    store1.initialize("claude-sonnet-4-20250514");
+    store1.load();
 
     // Append messages
-    await store1.appendMessage(userMessage("Hello"));
-    await store1.appendMessage(assistantMessage("Hi!"));
-    await store1.appendMessage(userMessage("How are you?"));
-    await store1.appendMessage(
+    store1.appendMessage(userMessage("Hello"));
+    store1.appendMessage(assistantMessage("Hi!"));
+    store1.appendMessage(userMessage("How are you?"));
+    store1.appendMessage(
       assistantMessage("I am doing well, thank you.")
     );
 
     // Update metadata
-    await store1.updateMetadata({ compactionCount: 0 });
+    store1.updateMetadata({ compactionCount: 0 });
 
     // Reload from disk (new store instance)
     const store2 = createConversationStore(storage, "agent");
-    const state = await store2.load();
+    const state = store2.load();
 
     expect(state.messages).toHaveLength(4);
     expect(state.metadata.model).toBe("claude-sonnet-4-20250514");
     expect(state.metadata.compactionCount).toBe(0);
   });
 
-  it("compaction lifecycle: append -> compact -> continue -> reload", async () => {
+  it("compaction lifecycle: append -> compact -> continue -> reload", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
     // Phase 1: Build up conversation
     for (let i = 0; i < 10; i++) {
-      await store.appendMessage(userMessage(`Question ${i}`));
-      await store.appendMessage(assistantMessage(`Answer ${i}`));
+      store.appendMessage(userMessage(`Question ${i}`));
+      store.appendMessage(assistantMessage(`Answer ${i}`));
     }
     expect(store.getMessages()).toHaveLength(20);
 
@@ -528,38 +524,38 @@ describe("full lifecycle", () => {
       "Summary: User asked 10 questions about various topics."
     );
     const kept = store.getMessages().slice(-4); // Keep last 4 messages
-    await store.replaceTranscript([summary, ...kept]);
-    await store.updateMetadata({ compactionCount: 1 });
+    store.replaceTranscript([summary, ...kept]);
+    store.updateMetadata({ compactionCount: 1 });
 
     expect(store.getMessages()).toHaveLength(5); // summary + 4 kept
 
     // Phase 3: Continue conversation
-    await store.appendMessage(userMessage("New question"));
-    await store.appendMessage(assistantMessage("New answer"));
+    store.appendMessage(userMessage("New question"));
+    store.appendMessage(assistantMessage("New answer"));
 
     expect(store.getMessages()).toHaveLength(7);
 
     // Phase 4: Reload and verify
     const freshStore = createConversationStore(storage, "agent");
-    const state = await freshStore.load();
+    const state = freshStore.load();
 
     expect(state.messages).toHaveLength(7);
     expect(state.messages[0].content).toContain("Summary:");
     expect(state.metadata.compactionCount).toBe(1);
   });
 
-  it("multiple stores for different conversations are independent", async () => {
+  it("multiple stores for different conversations are independent", () => {
     const storeA = createConversationStore(storage, "agent-a");
     const storeB = createConversationStore(storage, "agent-b");
 
-    await storeA.initialize("model-a");
-    await storeB.initialize("model-b");
-    await storeA.load();
-    await storeB.load();
+    storeA.initialize("model-a");
+    storeB.initialize("model-b");
+    storeA.load();
+    storeB.load();
 
-    await storeA.appendMessage(userMessage("Hello from A"));
-    await storeB.appendMessage(userMessage("Hello from B"));
-    await storeB.appendMessage(userMessage("Second from B"));
+    storeA.appendMessage(userMessage("Hello from A"));
+    storeB.appendMessage(userMessage("Hello from B"));
+    storeB.appendMessage(userMessage("Second from B"));
 
     expect(storeA.getMessages()).toHaveLength(1);
     expect(storeB.getMessages()).toHaveLength(2);
@@ -594,39 +590,39 @@ describe("error types", () => {
 // -----------------------------------------------------------------------------
 
 describe("edge cases", () => {
-  it("handles messages with empty string content", async () => {
+  it("handles messages with empty string content", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
-    await store.appendMessage(userMessage(""));
+    store.appendMessage(userMessage(""));
     expect(store.getMessages()[0].content).toBe("");
   });
 
-  it("handles messages with unicode content", async () => {
+  it("handles messages with unicode content", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
-    await store.appendMessage(userMessage("Hello \u{1F600} World \u6771\u4EAC"));
+    store.appendMessage(userMessage("Hello \u{1F600} World \u6771\u4EAC"));
     const freshStore = createConversationStore(storage, "agent");
-    const state = await freshStore.load();
+    const state = freshStore.load();
     expect(state.messages[0].content).toBe("Hello \u{1F600} World \u6771\u4EAC");
   });
 
-  it("handles messages with very long content", async () => {
+  it("handles messages with very long content", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
     const longContent = "x".repeat(100_000);
-    await store.appendMessage(userMessage(longContent));
+    store.appendMessage(userMessage(longContent));
 
     const freshStore = createConversationStore(storage, "agent");
-    const state = await freshStore.load();
+    const state = freshStore.load();
     expect((state.messages[0].content as string).length).toBe(100_000);
   });
 
-  it("handles complex tool use / tool result conversation", async () => {
+  it("handles complex tool use / tool result conversation", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
     // Full tool use cycle
     const messages: Message[] = [
@@ -660,18 +656,18 @@ describe("edge cases", () => {
     ];
 
     for (const msg of messages) {
-      await store.appendMessage(msg);
+      store.appendMessage(msg);
     }
 
     // Verify round-trip
     const freshStore = createConversationStore(storage, "agent");
-    const state = await freshStore.load();
+    const state = freshStore.load();
     expect(state.messages).toEqual(messages);
   });
 
-  it("handles tool result with is_error flag", async () => {
+  it("handles tool result with is_error flag", () => {
     const store = createConversationStore(storage, "agent");
-    await initAndLoad(store);
+    initAndLoad(store);
 
     const errorResult: Message = {
       role: "user",
@@ -685,10 +681,10 @@ describe("edge cases", () => {
       ],
     };
 
-    await store.appendMessage(errorResult);
+    store.appendMessage(errorResult);
 
     const freshStore = createConversationStore(storage, "agent");
-    const state = await freshStore.load();
+    const state = freshStore.load();
     const block = (state.messages[0].content as ReadonlyArray<{ type: string; is_error?: boolean }>)[0];
     expect(block.is_error).toBe(true);
   });

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -16,19 +16,16 @@ import {
 
 let homeDir: string;
 
-beforeEach(async () => {
-  homeDir = await mkdtemp(join(tmpdir(), "komatachi-identity-test-"));
+beforeEach(() => {
+  homeDir = mkdtempSync(join(tmpdir(), "komatachi-identity-test-"));
 });
 
-afterEach(async () => {
-  await rm(homeDir, { recursive: true, force: true });
+afterEach(() => {
+  rmSync(homeDir, { recursive: true, force: true });
 });
 
-async function writeIdentityFile(
-  name: string,
-  content: string
-): Promise<void> {
-  await writeFile(join(homeDir, name), content, "utf-8");
+function writeIdentityFile(name: string, content: string): void {
+  writeFileSync(join(homeDir, name), content, "utf-8");
 }
 
 const emptyIdentity: IdentityFiles = {
@@ -49,8 +46,8 @@ const defaultRuntime: RuntimeInfo = {
 // -----------------------------------------------------------------------------
 
 describe("loadIdentityFiles", () => {
-  it("returns null for all files when directory is empty", async () => {
-    const files = await loadIdentityFiles(homeDir);
+  it("returns null for all files when directory is empty", () => {
+    const files = loadIdentityFiles(homeDir);
 
     expect(files.soul).toBeNull();
     expect(files.identity).toBeNull();
@@ -60,24 +57,24 @@ describe("loadIdentityFiles", () => {
     expect(files.tools).toBeNull();
   });
 
-  it("loads SOUL.md when present", async () => {
-    await writeIdentityFile("SOUL.md", "I am curious and kind.");
+  it("loads SOUL.md when present", () => {
+    writeIdentityFile("SOUL.md", "I am curious and kind.");
 
-    const files = await loadIdentityFiles(homeDir);
+    const files = loadIdentityFiles(homeDir);
 
     expect(files.soul).toBe("I am curious and kind.");
     expect(files.identity).toBeNull();
   });
 
-  it("loads all identity files when present", async () => {
-    await writeIdentityFile("SOUL.md", "Soul content");
-    await writeIdentityFile("IDENTITY.md", "Identity content");
-    await writeIdentityFile("USER.md", "User content");
-    await writeIdentityFile("MEMORY.md", "Memory content");
-    await writeIdentityFile("AGENTS.md", "Agents content");
-    await writeIdentityFile("TOOLS.md", "Tools content");
+  it("loads all identity files when present", () => {
+    writeIdentityFile("SOUL.md", "Soul content");
+    writeIdentityFile("IDENTITY.md", "Identity content");
+    writeIdentityFile("USER.md", "User content");
+    writeIdentityFile("MEMORY.md", "Memory content");
+    writeIdentityFile("AGENTS.md", "Agents content");
+    writeIdentityFile("TOOLS.md", "Tools content");
 
-    const files = await loadIdentityFiles(homeDir);
+    const files = loadIdentityFiles(homeDir);
 
     expect(files.soul).toBe("Soul content");
     expect(files.identity).toBe("Identity content");
@@ -87,11 +84,11 @@ describe("loadIdentityFiles", () => {
     expect(files.tools).toBe("Tools content");
   });
 
-  it("loads a subset of files (mixed present/absent)", async () => {
-    await writeIdentityFile("SOUL.md", "I exist.");
-    await writeIdentityFile("MEMORY.md", "I remember things.");
+  it("loads a subset of files (mixed present/absent)", () => {
+    writeIdentityFile("SOUL.md", "I exist.");
+    writeIdentityFile("MEMORY.md", "I remember things.");
 
-    const files = await loadIdentityFiles(homeDir);
+    const files = loadIdentityFiles(homeDir);
 
     expect(files.soul).toBe("I exist.");
     expect(files.identity).toBeNull();
@@ -101,29 +98,29 @@ describe("loadIdentityFiles", () => {
     expect(files.tools).toBeNull();
   });
 
-  it("preserves whitespace and newlines in file content", async () => {
+  it("preserves whitespace and newlines in file content", () => {
     const content = "Line 1\n\nLine 3\n  Indented\n";
-    await writeIdentityFile("SOUL.md", content);
+    writeIdentityFile("SOUL.md", content);
 
-    const files = await loadIdentityFiles(homeDir);
+    const files = loadIdentityFiles(homeDir);
 
     expect(files.soul).toBe(content);
   });
 
-  it("handles unicode content", async () => {
-    await writeIdentityFile("IDENTITY.md", "Name: \u6771\u4EAC Bot \u{1F916}");
+  it("handles unicode content", () => {
+    writeIdentityFile("IDENTITY.md", "Name: \u6771\u4EAC Bot \u{1F916}");
 
-    const files = await loadIdentityFiles(homeDir);
+    const files = loadIdentityFiles(homeDir);
 
     expect(files.identity).toBe("Name: \u6771\u4EAC Bot \u{1F916}");
   });
 
-  it("ignores non-identity files in the directory", async () => {
-    await writeIdentityFile("SOUL.md", "Soul");
-    await writeIdentityFile("README.md", "Not an identity file");
-    await writeIdentityFile("config.json", "{}");
+  it("ignores non-identity files in the directory", () => {
+    writeIdentityFile("SOUL.md", "Soul");
+    writeIdentityFile("README.md", "Not an identity file");
+    writeIdentityFile("config.json", "{}");
 
-    const files = await loadIdentityFiles(homeDir);
+    const files = loadIdentityFiles(homeDir);
 
     expect(files.soul).toBe("Soul");
     // No properties for non-identity files
@@ -412,15 +409,15 @@ describe("buildSystemPrompt - edge cases", () => {
 // -----------------------------------------------------------------------------
 
 describe("integration: load then build", () => {
-  it("loads files and builds prompt end-to-end", async () => {
-    await writeIdentityFile(
+  it("loads files and builds prompt end-to-end", () => {
+    writeIdentityFile(
       "SOUL.md",
       "I am a persistent AI entity with memory and identity."
     );
-    await writeIdentityFile("IDENTITY.md", "Name: TestBot");
-    await writeIdentityFile("MEMORY.md", "User likes Rust.");
+    writeIdentityFile("IDENTITY.md", "Name: TestBot");
+    writeIdentityFile("MEMORY.md", "User likes Rust.");
 
-    const files = await loadIdentityFiles(homeDir);
+    const files = loadIdentityFiles(homeDir);
     const prompt = buildSystemPrompt(
       files,
       [{ name: "greet", description: "Say hello" }],
@@ -434,8 +431,8 @@ describe("integration: load then build", () => {
     expect(prompt).toContain("2026-01-01T00:00:00Z");
   });
 
-  it("works with empty home directory", async () => {
-    const files = await loadIdentityFiles(homeDir);
+  it("works with empty home directory", () => {
+    const files = loadIdentityFiles(homeDir);
     const prompt = buildSystemPrompt(files, [], {
       currentTime: "2026-01-01T00:00:00Z",
     });

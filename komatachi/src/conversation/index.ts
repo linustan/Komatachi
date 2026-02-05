@@ -10,6 +10,7 @@
  * - Respect layer boundaries: Uses Storage for I/O, adds conversation semantics
  * - Fail clearly: Explicit initialization, no implicit creation
  * - One conversation per agent: No session multiplexing
+ * - Synchronous I/O: All operations are synchronous (disk writes are single-digit ms)
  */
 
 import type { Storage } from "../storage/index.js";
@@ -85,13 +86,13 @@ export interface ConversationState {
  */
 export interface ConversationStore {
   /** Load the conversation from disk into memory. Must be called before other operations. */
-  load(): Promise<ConversationState>;
+  load(): ConversationState;
 
   /** Create a new conversation (metadata + empty transcript). Fails if already exists. */
-  initialize(model?: string): Promise<void>;
+  initialize(model?: string): void;
 
   /** Append a message to both memory and disk */
-  appendMessage(message: Message): Promise<void>;
+  appendMessage(message: Message): void;
 
   /** Return in-memory messages (no disk I/O) */
   getMessages(): readonly Message[];
@@ -100,10 +101,10 @@ export interface ConversationStore {
   getMetadata(): ConversationMetadata;
 
   /** Atomically replace the entire transcript (for compaction) */
-  replaceTranscript(messages: readonly Message[]): Promise<void>;
+  replaceTranscript(messages: readonly Message[]): void;
 
   /** Update metadata fields (partial update, merged with existing) */
-  updateMetadata(updates: Partial<Pick<ConversationMetadata, "compactionCount" | "model">>): Promise<void>;
+  updateMetadata(updates: Partial<Pick<ConversationMetadata, "compactionCount" | "model">>): void;
 }
 
 // -----------------------------------------------------------------------------
@@ -167,9 +168,9 @@ export function createConversationStore(
   }
 
   return {
-    async load(): Promise<ConversationState> {
-      const metadata = await storage.readJson<ConversationMetadata>(metadataPath);
-      const messages = await storage.readAllJsonl<Message>(transcriptPath);
+    load(): ConversationState {
+      const metadata = storage.readJson<ConversationMetadata>(metadataPath);
+      const messages = storage.readAllJsonl<Message>(transcriptPath);
 
       loadedMetadata = metadata;
       loadedMessages = messages;
@@ -177,11 +178,11 @@ export function createConversationStore(
       return { metadata, messages };
     },
 
-    async initialize(model?: string): Promise<void> {
+    initialize(model?: string): void {
       // Check if conversation already exists by attempting to read metadata
       let exists = true;
       try {
-        await storage.readJson(metadataPath);
+        storage.readJson(metadataPath);
       } catch (error) {
         if (error && typeof error === "object" && "name" in error &&
             (error as { name: string }).name === "StorageNotFoundError") {
@@ -203,18 +204,18 @@ export function createConversationStore(
         model: model ?? null,
       };
 
-      await storage.writeJson(metadataPath, metadata);
-      await storage.writeJsonl(transcriptPath, []);
+      storage.writeJson(metadataPath, metadata);
+      storage.writeJsonl(transcriptPath, []);
 
       loadedMetadata = metadata;
       loadedMessages = [];
     },
 
-    async appendMessage(message: Message): Promise<void> {
+    appendMessage(message: Message): void {
       requireLoaded();
 
       // Append to disk first (crash safety: if this fails, memory is unchanged)
-      await storage.appendJsonl(transcriptPath, message);
+      storage.appendJsonl(transcriptPath, message);
 
       // Update in-memory state
       loadedMessages!.push(message);
@@ -224,7 +225,7 @@ export function createConversationStore(
         ...loadedMetadata!,
         updatedAt: Date.now(),
       };
-      await storage.writeJson(metadataPath, updatedMetadata);
+      storage.writeJson(metadataPath, updatedMetadata);
       loadedMetadata = updatedMetadata;
     },
 
@@ -238,11 +239,11 @@ export function createConversationStore(
       return loadedMetadata!;
     },
 
-    async replaceTranscript(messages: readonly Message[]): Promise<void> {
+    replaceTranscript(messages: readonly Message[]): void {
       requireLoaded();
 
       // Atomic rewrite on disk first
-      await storage.writeJsonl(transcriptPath, [...messages]);
+      storage.writeJsonl(transcriptPath, [...messages]);
 
       // Replace in-memory state
       loadedMessages = [...messages];
@@ -252,13 +253,13 @@ export function createConversationStore(
         ...loadedMetadata!,
         updatedAt: Date.now(),
       };
-      await storage.writeJson(metadataPath, updatedMetadata);
+      storage.writeJson(metadataPath, updatedMetadata);
       loadedMetadata = updatedMetadata;
     },
 
-    async updateMetadata(
+    updateMetadata(
       updates: Partial<Pick<ConversationMetadata, "compactionCount" | "model">>
-    ): Promise<void> {
+    ): void {
       requireLoaded();
 
       const updatedMetadata: ConversationMetadata = {
@@ -267,7 +268,7 @@ export function createConversationStore(
         updatedAt: Date.now(),
       };
 
-      await storage.writeJson(metadataPath, updatedMetadata);
+      storage.writeJson(metadataPath, updatedMetadata);
       loadedMetadata = updatedMetadata;
     },
   };

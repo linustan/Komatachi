@@ -55,3 +55,6 @@ The system prompt builder accepts `ToolSummary` (name + description), not the fu
 
 ### Content trimmed in sections
 File contents are trimmed when included in sections. Trailing newlines and whitespace from file editing don't affect prompt formatting.
+
+### Synchronous file loading
+`loadIdentityFiles()` uses `readFileSync` rather than async `readFile`. Identity files are small (typically < 10KB each), and loading happens once per turn. See Storage DECISIONS.md for the full rationale for synchronous I/O.

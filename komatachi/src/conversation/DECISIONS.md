@@ -62,3 +62,6 @@ These gaps were identified in the integration trace and resolved during implemen
 
 - **Gap #1**: `replaceTranscript()` -- Implemented as specified. Atomically rewrites JSONL via Storage's `writeJsonl`, then replaces in-memory state.
 - **Gap #5**: In-memory state management -- Implemented with explicit `load()` requirement and `ConversationNotLoadedError` guard.
+
+### Synchronous interface
+All methods (`load`, `initialize`, `appendMessage`, `replaceTranscript`, `updateMetadata`) are synchronous. `getMessages()` and `getMetadata()` were always synchronous (in-memory reads). The mutating methods are now also synchronous because Storage's I/O is synchronous. See Storage DECISIONS.md for the full rationale.

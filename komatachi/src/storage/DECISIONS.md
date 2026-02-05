@@ -49,3 +49,13 @@ Writing an empty array creates an empty file rather than deleting it. The file's
 
 ### Specific error types, not generic
 Three distinct error types (`StorageNotFoundError`, `StorageCorruptionError`, `StorageIOError`) instead of a single `StorageError`. Each carries the path and (for corruption/IO) the underlying cause. This serves auditability (Principle 4) and matches the pattern established by compaction's `InputTooLargeError` and embeddings' error hierarchy.
+
+### Synchronous filesystem I/O
+All operations use `node:fs` sync methods (`readFileSync`, `writeFileSync`, `appendFileSync`, `renameSync`, `unlinkSync`, `mkdirSync`) rather than async (`node:fs/promises`). Rationale:
+
+1. **Disk writes are single-digit ms.** LLM API calls are seconds. Async I/O optimizes a 1ms operation inside a 3000ms turn -- negligible.
+2. **One writer per process** (Decision #9). With no concurrent writers, there is nothing to unblock while waiting for disk I/O.
+3. **Avoids tokio in Rust.** Sync maps directly to `std::fs`, eliminating an entire class of async runtime bugs.
+4. **Simpler code.** No `async`/`await`, no `Promise` return types, no `.then()` chains. Every function returns its value directly.
+
+This was initially implemented with async I/O and converted to sync after analysis showed the async overhead provided no user-facing benefit.

@@ -442,6 +442,32 @@ Files created:
 - `src/tools/index.test.ts` - 17 tests
 - `src/tools/DECISIONS.md` - Architectural decision record
 
+### 17. Synchronous I/O Conversion (Complete)
+
+Converted Storage, Conversation Store, and Identity modules from async (`node:fs/promises`) to sync (`node:fs`) filesystem operations.
+
+**Rationale**:
+- Disk writes are single-digit ms; LLM API calls are seconds. Async I/O optimizes the wrong thing.
+- One writer per process (Decision #9) means nothing to unblock during disk I/O.
+- Avoids tokio in Rust: sync maps directly to `std::fs`, eliminating an entire class of async runtime bugs.
+- Simpler code: no `async`/`await`, no `Promise` types, every function returns directly.
+
+**What changed**:
+- `Storage` interface: all methods return `T`/`void` instead of `Promise<T>`/`Promise<void>`
+- `ConversationStore` interface: `load()`, `initialize()`, `appendMessage()`, `replaceTranscript()`, `updateMetadata()` all synchronous
+- `loadIdentityFiles()`: synchronous (`readFileSync`)
+- All tests converted: sync setup/teardown (`mkdtempSync`/`rmSync`), sync assertions (no `await`, no `rejects.toThrow()`)
+- `executeTool()` in Tool Registry stays async (tool handlers genuinely involve subprocess/network)
+
+**Test results**: 250 tests passing, type-check clean.
+
+**Deviation from original plan**: The roadmap assumed async I/O. Analysis of the one-agent-per-process architecture showed sync is strictly better for this use case.
+
+Files updated:
+- `src/storage/index.ts`, `src/storage/index.test.ts`, `src/storage/DECISIONS.md`
+- `src/conversation/index.ts`, `src/conversation/index.test.ts`, `src/conversation/DECISIONS.md`
+- `src/identity/index.ts`, `src/identity/index.test.ts`, `src/identity/DECISIONS.md`
+
 ## Open Questions
 
 None currently.

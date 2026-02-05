@@ -10,9 +10,10 @@
  * - Simple function, not a registry: section builders called in order
  * - String interpolation, no template engine
  * - No plugin hooks for prompt modification
+ * - Synchronous I/O: Identity files are small; sync reads are fine
  */
 
-import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // -----------------------------------------------------------------------------
@@ -80,15 +81,13 @@ const IDENTITY_FILE_MAP: ReadonlyArray<{
  * filesystem, not through Storage, because identity files live outside
  * the storage base directory.
  */
-export async function loadIdentityFiles(
-  homeDir: string
-): Promise<IdentityFiles> {
+export function loadIdentityFiles(homeDir: string): IdentityFiles {
   const result: Record<string, string | null> = {};
 
   for (const { key, filename } of IDENTITY_FILE_MAP) {
     const filePath = join(homeDir, filename);
     try {
-      result[key] = await readFile(filePath, "utf-8");
+      result[key] = readFileSync(filePath, "utf-8");
     } catch (error) {
       if (isNotFoundError(error)) {
         result[key] = null;

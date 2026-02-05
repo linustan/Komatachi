@@ -10,16 +10,17 @@
  * - Fail clearly: Specific error types for not-found, corruption, I/O
  * - Make state explicit: No caching, no hidden state
  * - Crash resilient: Atomic writes (write-to-temp, rename), partial line handling
+ * - Synchronous I/O: Single-digit ms disk writes, dominated by LLM API latency
  */
 
 import {
-  readFile,
-  writeFile,
-  appendFile,
-  rename,
-  unlink,
-  mkdir,
-} from "node:fs/promises";
+  readFileSync,
+  writeFileSync,
+  appendFileSync,
+  renameSync,
+  unlinkSync,
+  mkdirSync,
+} from "node:fs";
 import { join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -39,22 +40,22 @@ export interface Storage {
   readonly baseDir: string;
 
   /** Read and parse a JSON file */
-  readJson<T>(path: string): Promise<T>;
+  readJson<T>(path: string): T;
 
   /** Write data as JSON with atomic write (write-to-temp, rename) */
-  writeJson<T>(path: string, data: T): Promise<void>;
+  writeJson<T>(path: string, data: T): void;
 
   /** Append a single JSON entry as a new line to a JSONL file */
-  appendJsonl<T>(path: string, entry: T): Promise<void>;
+  appendJsonl<T>(path: string, entry: T): void;
 
   /** Read all entries from a JSONL file. Skips partial trailing lines from crashes */
-  readAllJsonl<T>(path: string): Promise<T[]>;
+  readAllJsonl<T>(path: string): T[];
 
   /** Read entries from a JSONL file in line range [start, end) */
-  readRangeJsonl<T>(path: string, start: number, end: number): Promise<T[]>;
+  readRangeJsonl<T>(path: string, start: number, end: number): T[];
 
   /** Atomically rewrite a JSONL file with new entries */
-  writeJsonl<T>(path: string, entries: T[]): Promise<void>;
+  writeJsonl<T>(path: string, entries: T[]): void;
 }
 
 // -----------------------------------------------------------------------------
@@ -112,26 +113,23 @@ export function createStorage(baseDir: string): Storage {
     return join(baseDir, relativePath);
   }
 
-  async function ensureParentDir(fullPath: string): Promise<void> {
-    await mkdir(dirname(fullPath), { recursive: true });
+  function ensureParentDir(fullPath: string): void {
+    mkdirSync(dirname(fullPath), { recursive: true });
   }
 
   /**
    * Atomic write: write to a temp file in the same directory, then rename.
    * Rename is atomic on POSIX filesystems, providing crash safety.
    */
-  async function atomicWrite(
-    fullPath: string,
-    content: string
-  ): Promise<void> {
-    await ensureParentDir(fullPath);
+  function atomicWrite(fullPath: string, content: string): void {
+    ensureParentDir(fullPath);
     const tempPath = `${fullPath}.${randomUUID()}.tmp`;
     try {
-      await writeFile(tempPath, content, "utf-8");
-      await rename(tempPath, fullPath);
+      writeFileSync(tempPath, content, "utf-8");
+      renameSync(tempPath, fullPath);
     } catch (error) {
       try {
-        await unlink(tempPath);
+        unlinkSync(tempPath);
       } catch {
         // Temp file cleanup is best-effort
       }
@@ -179,12 +177,12 @@ export function createStorage(baseDir: string): Storage {
 
   // -- Method implementations as closures (no `this` binding issues) ----------
 
-  async function readJson<T>(path: string): Promise<T> {
+  function readJson<T>(path: string): T {
     const fullPath = resolve(path);
 
     let content: string;
     try {
-      content = await readFile(fullPath, "utf-8");
+      content = readFileSync(fullPath, "utf-8");
     } catch (error) {
       if (isNotFoundError(error)) {
         throw new StorageNotFoundError(path);
@@ -199,31 +197,31 @@ export function createStorage(baseDir: string): Storage {
     }
   }
 
-  async function writeJson<T>(path: string, data: T): Promise<void> {
+  function writeJson<T>(path: string, data: T): void {
     const fullPath = resolve(path);
     try {
-      await atomicWrite(fullPath, JSON.stringify(data, null, 2) + "\n");
+      atomicWrite(fullPath, JSON.stringify(data, null, 2) + "\n");
     } catch (error) {
       throw new StorageIOError(path, error);
     }
   }
 
-  async function appendJsonl<T>(path: string, entry: T): Promise<void> {
+  function appendJsonl<T>(path: string, entry: T): void {
     const fullPath = resolve(path);
     try {
-      await ensureParentDir(fullPath);
-      await appendFile(fullPath, JSON.stringify(entry) + "\n", "utf-8");
+      ensureParentDir(fullPath);
+      appendFileSync(fullPath, JSON.stringify(entry) + "\n", "utf-8");
     } catch (error) {
       throw new StorageIOError(path, error);
     }
   }
 
-  async function readAllJsonl<T>(path: string): Promise<T[]> {
+  function readAllJsonl<T>(path: string): T[] {
     const fullPath = resolve(path);
 
     let content: string;
     try {
-      content = await readFile(fullPath, "utf-8");
+      content = readFileSync(fullPath, "utf-8");
     } catch (error) {
       if (isNotFoundError(error)) {
         throw new StorageNotFoundError(path);
@@ -234,26 +232,26 @@ export function createStorage(baseDir: string): Storage {
     return parseJsonlContent<T>(content, path);
   }
 
-  async function readRangeJsonl<T>(
+  function readRangeJsonl<T>(
     path: string,
     start: number,
     end: number
-  ): Promise<T[]> {
-    const all = await readAllJsonl<T>(path);
+  ): T[] {
+    const all = readAllJsonl<T>(path);
     return all.slice(start, end);
   }
 
-  async function writeJsonl<T>(
+  function writeJsonl<T>(
     path: string,
     entries: T[]
-  ): Promise<void> {
+  ): void {
     const fullPath = resolve(path);
     const content =
       entries.length === 0
         ? ""
         : entries.map((entry) => JSON.stringify(entry) + "\n").join("");
     try {
-      await atomicWrite(fullPath, content);
+      atomicWrite(fullPath, content);
     } catch (error) {
       throw new StorageIOError(path, error);
     }
