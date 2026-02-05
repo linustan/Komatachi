@@ -6,9 +6,9 @@
 
 | Aspect | State |
 |--------|-------|
-| **Phase** | Phase 3 complete. Ready for Phase 4 implementation. |
-| **Last completed** | Phase 3: Agent Identity (System Prompt + Tool Registry) |
-| **Next action** | Begin Phase 4.1 -- Agent Loop implementation |
+| **Phase** | Phase 4 complete. Ready for Phase 5 (Integration Validation). |
+| **Last completed** | Phase 4: Agent Loop (wires all modules together) |
+| **Next action** | Begin Phase 5 -- Integration Validation (end-to-end pipeline test) |
 | **Blockers** | None |
 
 ### What Exists Now
@@ -24,9 +24,11 @@
 - [x] Context Window module: `src/context/` (24 tests)
 - [x] System Prompt module: `src/identity/` (28 tests)
 - [x] Tool Registry module: `src/tools/` (17 tests)
+- [x] Agent Loop module: `src/agent/` (25 tests)
+- [x] Compaction module updated to use Claude API message types
 
-### Current Focus: Phase 4 Implementation
-Phases 1-3 complete. All component modules are built. Next: Phase 4 -- Agent Loop (main execution loop wiring everything together with Claude API).
+### Current Focus: Phase 5 Integration Validation
+Phases 1-4 complete. All modules are built and wired together. Next: Phase 5 -- end-to-end integration validation.
 
 ---
 
@@ -175,6 +177,7 @@ Files created:
 9. **One agent per process** - Each agent runs in its own OS process. No shared in-process state between agents. Inter-agent communication, when needed, is explicit message passing (IPC), not shared memory. This eliminates file locking, cross-agent access control, session namespacing, and shared registries. OpenClaw's own agent-to-agent communication is already asynchronous message passing through session transcripts -- separate processes makes the existing logical isolation physical. OS process boundaries provide security isolation, failure isolation, and a natural scaling model (separate processes can become separate machines).
 10. **One conversation per agent, no sessions** - There are no "sessions." Each agent has one conversation that persists indefinitely, compacted as needed. OpenClaw's session concept (daily resets, idle timeouts, compound session keys) exists to multiplex many conversations in one process. With one-agent-per-process, that multiplexing is unnecessary. Want a separate conversation? Start another agent.
 11. **Claude API message types** - Komatachi is built for Claude. Transcript messages use Claude's API format directly. No provider-agnostic abstraction.
+12. **Agent as headless worker process, orchestrator deferred** - The agent process communicates via structured messages on stdin/stdout (JSON-lines protocol). stdin/stdout is the transport; the protocol determines expressiveness. A separate orchestrator process owns agent processes and handles out-of-band concerns (spawning, routing, managing multiple agents). The orchestrator reads agent state from the conversation store on disk, not through the agent's pipes. See ROADMAP.md Decision #22.
 
 ---
 
@@ -212,7 +215,7 @@ See [ROADMAP.md](./ROADMAP.md) for the full sequenced plan. Summary:
 - [x] **Phase 1**: Storage & Conversation Foundation (Storage, Conversation Store)
 - [x] **Phase 2**: Context Pipeline (Context Window with History Management folded in)
 - [x] **Phase 3**: Agent Identity (System Prompt with identity loading, Tool Registry)
-- [ ] **Phase 4**: Agent Loop (main execution loop wiring everything together)
+- [x] **Phase 4**: Agent Loop (main execution loop wiring everything together)
 - [ ] **Phase 5**: Integration Validation (end-to-end pipeline test)
 
 ---
@@ -468,6 +471,55 @@ Files updated:
 - `src/conversation/index.ts`, `src/conversation/index.test.ts`, `src/conversation/DECISIONS.md`
 - `src/identity/index.ts`, `src/identity/index.test.ts`, `src/identity/DECISIONS.md`
 
+### 18. Phase 4: Agent Loop (Complete)
+
+Implemented the Agent Loop -- the orchestration layer that wires all previously distilled modules into a functioning agent turn processor.
+
+| Metric | OpenClaw | Distilled |
+|--------|----------|-----------|
+| Lines of code (agent loop + routing + dispatch) | ~2,400+ | ~280 |
+| Provider abstraction | Yes (pi-ai wrapper) | None (Claude-specific types) |
+| Streaming | Yes (SSE) | No (complete response) |
+| Multi-agent routing | Yes | No (one agent per process) |
+| Session management | Yes (compound keys, lifecycle) | None (one conversation) |
+
+**What was built**:
+- `createAgent(config)` factory returning an `Agent` with `processTurn(userInput)`
+- Turn processing: append user message -> build system prompt -> select context -> call Claude -> handle tool dispatch -> persist response -> return text
+- Tool dispatch loop: executes tool_use blocks, collects tool_result blocks, continues until Claude returns end_turn
+- Compaction triggering: detects context overflow, summarizes dropped messages, replaces transcript
+- Error types: `AgentError`, `ModelCallError`
+- Safety guards: MAX_MODEL_CALLS_PER_TURN (25), MAX_COMPACTION_ATTEMPTS (2)
+- 25 tests covering normal turns, tool dispatch, multi-round tool use, compaction, error handling, identity integration, context window integration
+
+**Also updated**: Compaction module's `Message` type aligned with Claude API format (integration trace Gap #3):
+- Removed local `Message` type, now imports from `conversation/index.ts`
+- `extractToolFailures()` updated to scan `tool_result` blocks in user messages, cross-referencing `tool_use` blocks in assistant messages for tool names
+- Removed `exitCode` from `ToolFailure` (not available in Claude API format)
+- Compaction tests rewritten for Claude API message format (46 tests, all passing)
+
+**Key decisions**:
+- `callModel` injected as function parameter for testability (not a provider abstraction -- all types are Claude-specific)
+- Iterative loop with counters instead of recursion (avoids stack overflow, clearer control flow)
+- `@anthropic-ai/sdk` deferred to application entry point (Agent Loop doesn't import it directly)
+- Identity files reloaded each loop iteration (changes take effect immediately)
+- File operations tracking deferred (Gap #4 -- passes empty sets to compaction)
+
+**Deviations from plan**:
+- Agent Loop accepts `callModel` function instead of importing `@anthropic-ai/sdk` directly. Roadmap Decision #19 says "use SDK directly, no abstraction." The `callModel` parameter is not a provider abstraction (it uses Claude-specific types). The SDK will be used at the application entry point when creating the function. This keeps the module testable without network calls.
+- TypeScript 5.9 control flow narrowing doesn't propagate through nested lambdas for `ReadonlyArray` union types. Added explicit `TextBlock` type annotation in compaction's `estimateTokens` for the `tool_result` content block mapping.
+
+**Test results**: 277 tests passing across 8 test files, type-check clean.
+
+Files created:
+- `src/agent/index.ts` - Agent Loop implementation
+- `src/agent/index.test.ts` - 25 tests
+- `src/agent/DECISIONS.md` - Architectural decision record
+
+Files updated:
+- `src/compaction/index.ts` - Claude API message types, updated extractToolFailures
+- `src/compaction/index.test.ts` - Rewritten for Claude API format (46 tests)
+
 ## Open Questions
 
 None currently.
@@ -496,9 +548,9 @@ komatachi/
 │   ├── agent-alignment.md
 │   └── session-management.md
 └── src/
-    ├── compaction/     # Trial distillation (validated)
+    ├── compaction/     # Trial distillation (validated, updated Phase 4)
     │   ├── index.ts
-    │   ├── index.test.ts   # 44 tests
+    │   ├── index.test.ts   # 46 tests
     │   └── DECISIONS.md
     ├── embeddings/     # Embeddings sub-module (validated)
     │   ├── index.ts        # Provider interface + OpenAI + utilities
@@ -520,9 +572,13 @@ komatachi/
     │   ├── index.ts        # loadIdentityFiles + buildSystemPrompt
     │   ├── index.test.ts   # 28 tests
     │   └── DECISIONS.md
-    └── tools/          # Phase 3.2: Tool registry
-        ├── index.ts        # ToolDefinition + exportForApi + executeTool
-        ├── index.test.ts   # 17 tests
+    ├── tools/          # Phase 3.2: Tool registry
+    │   ├── index.ts        # ToolDefinition + exportForApi + executeTool
+    │   ├── index.test.ts   # 17 tests
+    │   └── DECISIONS.md
+    └── agent/          # Phase 4: Agent Loop (orchestration)
+        ├── index.ts        # createAgent + processTurn + tool dispatch + compaction
+        ├── index.test.ts   # 25 tests
         └── DECISIONS.md
 ```
 

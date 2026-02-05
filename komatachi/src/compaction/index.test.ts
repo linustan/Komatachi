@@ -35,7 +35,7 @@ describe("estimateTokens", () => {
     expect(estimateTokens(msg)).toBe(25); // ceil(100/4) = 25
   });
 
-  it("handles content block arrays", () => {
+  it("handles text content block arrays", () => {
     const msg: Message = {
       role: "assistant",
       content: [
@@ -47,24 +47,41 @@ describe("estimateTokens", () => {
     expect(estimateTokens(msg)).toBe(3);
   });
 
-  it("handles mixed content blocks", () => {
+  it("handles tool_use content blocks", () => {
     const msg: Message = {
       role: "assistant",
       content: [
-        { type: "text", text: "Hello" },
-        { type: "image", data: "..." }, // non-text block
-        { type: "text", text: "World" },
+        { type: "text", text: "Let me check." },
+        { type: "tool_use", id: "toolu_1", name: "bash", input: { command: "ls" } },
       ],
     };
-    expect(estimateTokens(msg)).toBe(3);
+    const tokens = estimateTokens(msg);
+    // "Let me check." + JSON.stringify({ command: "ls" }) separated by newline
+    expect(tokens).toBeGreaterThan(0);
   });
 
-  it("handles non-string, non-array content via JSON stringify", () => {
+  it("handles tool_result content blocks", () => {
     const msg: Message = {
-      role: "tool",
-      content: { result: "success", count: 42 },
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: "toolu_1", content: "file1.ts\nfile2.ts" },
+      ],
     };
-    // JSON.stringify gives ~30 chars
+    const tokens = estimateTokens(msg);
+    expect(tokens).toBeGreaterThan(0);
+  });
+
+  it("handles tool_result with text block array content", () => {
+    const msg: Message = {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_1",
+          content: [{ type: "text", text: "result text" }],
+        },
+      ],
+    };
     const tokens = estimateTokens(msg);
     expect(tokens).toBeGreaterThan(0);
   });
@@ -135,15 +152,24 @@ describe("InputTooLargeError", () => {
 // -----------------------------------------------------------------------------
 
 describe("extractToolFailures", () => {
-  it("extracts failures from toolResult messages", () => {
+  it("extracts failures from tool_result content blocks", () => {
     const messages: Message[] = [
       {
-        role: "toolResult",
-        content: "Command failed: file not found",
-        toolCallId: "call_1",
-        toolName: "bash",
-        isError: true,
-        details: { exitCode: 1 },
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "call_1", name: "bash", input: { command: "cat foo.txt" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "call_1",
+            content: "Command failed: file not found",
+            is_error: true,
+          },
+        ],
       },
     ];
 
@@ -153,25 +179,33 @@ describe("extractToolFailures", () => {
       toolCallId: "call_1",
       toolName: "bash",
       errorSummary: "Command failed: file not found",
-      exitCode: 1,
     });
   });
 
   it("ignores non-error tool results", () => {
     const messages: Message[] = [
       {
-        role: "toolResult",
-        content: "Success",
-        toolCallId: "call_1",
-        toolName: "bash",
-        isError: false,
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "call_1", name: "bash", input: {} },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "call_1",
+            content: "Success",
+          },
+        ],
       },
     ];
 
     expect(extractToolFailures(messages)).toHaveLength(0);
   });
 
-  it("ignores non-toolResult messages", () => {
+  it("ignores plain text messages", () => {
     const messages: Message[] = [
       { role: "user", content: "Do something" },
       { role: "assistant", content: "I'll try" },
@@ -180,21 +214,24 @@ describe("extractToolFailures", () => {
     expect(extractToolFailures(messages)).toHaveLength(0);
   });
 
-  it("deduplicates by toolCallId", () => {
+  it("deduplicates by tool_use_id", () => {
     const messages: Message[] = [
       {
-        role: "toolResult",
-        content: "Error 1",
-        toolCallId: "call_1",
-        toolName: "bash",
-        isError: true,
-      },
-      {
-        role: "toolResult",
-        content: "Error 2",
-        toolCallId: "call_1", // same ID
-        toolName: "bash",
-        isError: true,
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "call_1",
+            content: "Error 1",
+            is_error: true,
+          },
+          {
+            type: "tool_result",
+            tool_use_id: "call_1",
+            content: "Error 2",
+            is_error: true,
+          },
+        ],
       },
     ];
 
@@ -205,11 +242,21 @@ describe("extractToolFailures", () => {
     const longError = "x".repeat(300);
     const messages: Message[] = [
       {
-        role: "toolResult",
-        content: longError,
-        toolCallId: "call_1",
-        toolName: "bash",
-        isError: true,
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "call_1", name: "bash", input: {} },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "call_1",
+            content: longError,
+            is_error: true,
+          },
+        ],
       },
     ];
 
@@ -218,14 +265,24 @@ describe("extractToolFailures", () => {
     expect(failures[0].errorSummary).toContain("...");
   });
 
-  it("handles content block arrays", () => {
+  it("handles tool_result with text block array content", () => {
     const messages: Message[] = [
       {
-        role: "toolResult",
-        content: [{ type: "text", text: "Error occurred" }],
-        toolCallId: "call_1",
-        toolName: "bash",
-        isError: true,
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "call_1", name: "bash", input: {} },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "call_1",
+            content: [{ type: "text", text: "Error occurred" }],
+            is_error: true,
+          },
+        ],
       },
     ];
 
@@ -236,11 +293,15 @@ describe("extractToolFailures", () => {
   it("provides default for empty error content", () => {
     const messages: Message[] = [
       {
-        role: "toolResult",
-        content: "",
-        toolCallId: "call_1",
-        toolName: "bash",
-        isError: true,
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "call_1",
+            content: "",
+            is_error: true,
+          },
+        ],
       },
     ];
 
@@ -251,16 +312,73 @@ describe("extractToolFailures", () => {
   it("normalizes whitespace in error text", () => {
     const messages: Message[] = [
       {
-        role: "toolResult",
-        content: "Error\n\nwith   multiple\tspaces",
-        toolCallId: "call_1",
-        toolName: "bash",
-        isError: true,
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "call_1",
+            content: "Error\n\nwith   multiple\tspaces",
+            is_error: true,
+          },
+        ],
       },
     ];
 
     const failures = extractToolFailures(messages);
     expect(failures[0].errorSummary).toBe("Error with multiple spaces");
+  });
+
+  it("uses 'tool' as fallback name when tool_use block not found", () => {
+    const messages: Message[] = [
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "call_unknown",
+            content: "error",
+            is_error: true,
+          },
+        ],
+      },
+    ];
+
+    const failures = extractToolFailures(messages);
+    expect(failures[0].toolName).toBe("tool");
+  });
+
+  it("resolves tool names from preceding assistant messages", () => {
+    const messages: Message[] = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "call_1", name: "read_file", input: { path: "foo.txt" } },
+          { type: "tool_use", id: "call_2", name: "write_file", input: { path: "bar.txt" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "call_1",
+            content: "permission denied",
+            is_error: true,
+          },
+          {
+            type: "tool_result",
+            tool_use_id: "call_2",
+            content: "disk full",
+            is_error: true,
+          },
+        ],
+      },
+    ];
+
+    const failures = extractToolFailures(messages);
+    expect(failures).toHaveLength(2);
+    expect(failures[0].toolName).toBe("read_file");
+    expect(failures[1].toolName).toBe("write_file");
   });
 });
 
@@ -315,23 +433,14 @@ describe("formatToolFailuresSection", () => {
     expect(formatToolFailuresSection([])).toBe("");
   });
 
-  it("formats failures with exit codes", () => {
+  it("formats failures with tool name and error", () => {
     const failures = [
-      { toolCallId: "1", toolName: "bash", errorSummary: "not found", exitCode: 1 },
+      { toolCallId: "1", toolName: "bash", errorSummary: "not found" },
     ];
 
     const section = formatToolFailuresSection(failures);
     expect(section).toContain("## Tool Failures");
-    expect(section).toContain("- bash (exit 1): not found");
-  });
-
-  it("formats failures without exit codes", () => {
-    const failures = [
-      { toolCallId: "1", toolName: "read", errorSummary: "permission denied" },
-    ];
-
-    const section = formatToolFailuresSection(failures);
-    expect(section).toContain("- read: permission denied");
+    expect(section).toContain("- bash: not found");
   });
 
   it("limits to 8 failures and shows count", () => {
@@ -449,12 +558,21 @@ describe("compact", () => {
   it("includes tool failures in result", async () => {
     const messages: Message[] = [
       {
-        role: "toolResult",
-        content: "file not found",
-        toolCallId: "call_1",
-        toolName: "read",
-        isError: true,
-        details: { exitCode: 1 },
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "call_1", name: "read_file", input: { path: "x.ts" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "call_1",
+            content: "file not found",
+            is_error: true,
+          },
+        ],
       },
     ];
 
@@ -467,7 +585,7 @@ describe("compact", () => {
 
     expect(result.metadata.toolFailures).toHaveLength(1);
     expect(result.summary).toContain("## Tool Failures");
-    expect(result.summary).toContain("read (exit 1)");
+    expect(result.summary).toContain("read_file: file not found");
   });
 
   it("uses fallback when summarizer throws", async () => {
