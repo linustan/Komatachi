@@ -2,6 +2,8 @@
 
 How each component composes into the minimal viable agent loop. This document verifies that interfaces fit together before implementation begins.
 
+> **Note (section 17)**: The interfaces below were designed with async (`Promise`-based) signatures. All Storage, Conversation Store, and Identity operations were later converted to synchronous I/O. The composition logic and turn traces remain accurate -- only the `Promise` wrappers are gone. See PROGRESS.md section 17 for rationale.
+
 ---
 
 ## Component Interfaces (Abstract)

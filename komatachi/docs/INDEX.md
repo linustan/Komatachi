@@ -36,9 +36,10 @@ Reference material for specific technical topics:
 
 | Guide | Purpose |
 |-------|---------|
-| [integration-trace.md](./integration-trace.md) | Full integration verification: component interfaces, turn traces, dependency graph, identified gaps |
+| [integration-trace.md](./integration-trace.md) | Component integration verification: interfaces, turn traces, dependency graph, gap analysis |
 | [testing-strategy.md](./testing-strategy.md) | Layer-based testing approach; when to mock vs use real deps |
 | [rust-porting.md](./rust-porting.md) | Lessons from Rust portability validation; patterns for future Rust migration |
+| [technical-debt.md](./technical-debt.md) | Architecture audit: technical debt, undocumented behaviors, OpenClaw gaps |
 
 ---
 
@@ -46,10 +47,17 @@ Reference material for specific technical topics:
 
 Each distilled module has its own DECISIONS.md:
 
-| Module | Decisions | Status |
-|--------|-----------|--------|
-| Compaction | [src/compaction/DECISIONS.md](../src/compaction/DECISIONS.md) | Validated (44 tests) |
-| Embeddings | [src/embeddings/DECISIONS.md](../src/embeddings/DECISIONS.md) | Validated (47 tests) |
+| Module | Decisions | Tests |
+|--------|-----------|-------|
+| Compaction | [src/compaction/DECISIONS.md](../src/compaction/DECISIONS.md) | 46 |
+| Embeddings | [src/embeddings/DECISIONS.md](../src/embeddings/DECISIONS.md) | 47 |
+| Storage | [src/storage/DECISIONS.md](../src/storage/DECISIONS.md) | 49 |
+| Conversation | [src/conversation/DECISIONS.md](../src/conversation/DECISIONS.md) | 41 |
+| Context | [src/context/DECISIONS.md](../src/context/DECISIONS.md) | 24 |
+| Identity | [src/identity/DECISIONS.md](../src/identity/DECISIONS.md) | 28 |
+| Tools | [src/tools/DECISIONS.md](../src/tools/DECISIONS.md) | 17 |
+| Agent | [src/agent/DECISIONS.md](../src/agent/DECISIONS.md) | 25 |
+| Integration | [src/integration/DECISIONS.md](../src/integration/DECISIONS.md) | 16 |
 
 ---
 
@@ -65,21 +73,24 @@ komatachi/
 │   ├── INDEX.md              # This file
 │   ├── integration-trace.md  # Component integration verification
 │   ├── testing-strategy.md   # Layer-based testing approach
-│   └── rust-porting.md       # Rust migration guide
+│   ├── rust-porting.md       # Rust migration guide
+│   └── technical-debt.md     # Architecture audit and OpenClaw gap analysis
 ├── scouting/              # OpenClaw analysis
 │   ├── context-management.md
 │   ├── long-term-memory-search.md
 │   ├── agent-alignment.md
 │   └── session-management.md
 └── src/
-    ├── compaction/
-    │   ├── index.ts
-    │   ├── index.test.ts
-    │   └── DECISIONS.md
-    └── embeddings/
-        ├── index.ts
-        ├── index.test.ts
-        └── DECISIONS.md
+    ├── index.ts           # Application entry point (stdin/stdout JSON-lines)
+    ├── compaction/         # Trial distillation (46 tests)
+    ├── embeddings/         # Embeddings sub-module (47 tests)
+    ├── storage/            # Phase 1.1: Generic file-based persistence (49 tests)
+    ├── conversation/       # Phase 1.2: Conversation persistence (41 tests)
+    ├── context/            # Phase 2.1: Context window management (24 tests)
+    ├── identity/           # Phase 3.1: System prompt / agent identity (28 tests)
+    ├── tools/              # Phase 3.2: Tool registry (17 tests)
+    ├── agent/              # Phase 4: Agent loop orchestration (25 tests)
+    └── integration/        # Phase 5: Integration validation (16 tests)
 ```
 
 ---
