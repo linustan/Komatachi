@@ -6,19 +6,19 @@
 
 | Aspect | State |
 |--------|-------|
-| **Phase** | Phase 4 complete. Ready for Phase 5 (Integration Validation). |
-| **Last completed** | Phase 4: Agent Loop (wires all modules together) |
-| **Next action** | Begin Phase 5 -- Integration Validation (end-to-end pipeline test) |
+| **Phase** | Phase 5 complete. All roadmap phases finished. |
+| **Last completed** | Phase 5: Integration Validation (16 end-to-end tests) |
+| **Next action** | Roadmap complete. Ready for next milestone (stdin/stdout entry point, orchestrator, or new roadmap). |
 | **Blockers** | None |
 
 ### What Exists Now
 - [x] Scouting reports for 4 core areas (~20k LOC analyzed)
 - [x] Distillation principles documented (8 principles)
-- [x] Trial distillation: `src/compaction/` (44 tests)
+- [x] Trial distillation: `src/compaction/` (46 tests)
 - [x] Embeddings sub-module: `src/embeddings/` (47 tests)
 - [x] Key architectural decisions (TypeScript+Rust, minimal viable agent, no gateway)
 - [x] Phased roadmap with autonomous execution framework (ROADMAP.md)
-- [x] Per-module decision resolution (20 pre-resolved decisions)
+- [x] Per-module decision resolution (22 pre-resolved decisions)
 - [x] Storage module: `src/storage/` (49 tests)
 - [x] Conversation Store module: `src/conversation/` (41 tests)
 - [x] Context Window module: `src/context/` (24 tests)
@@ -26,9 +26,10 @@
 - [x] Tool Registry module: `src/tools/` (17 tests)
 - [x] Agent Loop module: `src/agent/` (25 tests)
 - [x] Compaction module updated to use Claude API message types
+- [x] Integration validation: `src/integration/` (16 tests)
 
-### Current Focus: Phase 5 Integration Validation
-Phases 1-4 complete. All modules are built and wired together. Next: Phase 5 -- end-to-end integration validation.
+### All Roadmap Phases Complete
+All 5 phases of the distillation roadmap are finished. 293 tests pass across 9 test files. Type-check clean. The minimal viable agent loop is built and validated end-to-end.
 
 ---
 
@@ -216,7 +217,14 @@ See [ROADMAP.md](./ROADMAP.md) for the full sequenced plan. Summary:
 - [x] **Phase 2**: Context Pipeline (Context Window with History Management folded in)
 - [x] **Phase 3**: Agent Identity (System Prompt with identity loading, Tool Registry)
 - [x] **Phase 4**: Agent Loop (main execution loop wiring everything together)
-- [ ] **Phase 5**: Integration Validation (end-to-end pipeline test)
+- [x] **Phase 5**: Integration Validation (end-to-end pipeline test)
+
+All roadmap phases complete. Possible next directions:
+- **Application entry point**: stdin/stdout JSON-lines process (Decision #22)
+- **Concrete tools**: File I/O, shell execution, or domain-specific tools
+- **Orchestrator**: Process manager for agent lifecycle (Decision #22)
+- **Streaming**: Incremental response output (deferred in Decision #20)
+- **Memory layer**: Vector search + embeddings for long-term semantic memory (deferred in roadmap)
 
 ---
 
@@ -520,6 +528,32 @@ Files updated:
 - `src/compaction/index.ts` - Claude API message types, updated extractToolFailures
 - `src/compaction/index.test.ts` - Rewritten for Claude API format (46 tests)
 
+### 19. Phase 5: Integration Validation (Complete)
+
+Verified that all modules compose correctly into a working agent loop through 16 end-to-end integration tests.
+
+| Scenario | Tests | What It Validates |
+|----------|-------|-------------------|
+| Conversation lifecycle | 2 | Persistence to disk, reload, continuation across sessions |
+| Tool dispatch e2e | 2 | Tool execution, intermediate message persistence, error handling |
+| Compaction lifecycle | 2 | Overflow detection, compaction, persistence, continued operation |
+| Crash recovery | 1 | New store from disk state, history preserved, conversation continues |
+| Identity evolution | 2 | Identity files change between turns, new files picked up |
+| Complex pipeline | 1 | Multi-turn with tools, padding, compaction, then continued operation |
+| Module interface composition | 4 | System prompt includes tools, context window receives all messages, model params match config, metadata tracks all operations |
+| Data integrity | 2 | Content blocks survive JSONL round-trip, raw disk format correct |
+
+**Key findings**:
+- No interface mismatches between modules. All 7 gaps from the integration trace were resolved during Phases 1-4.
+- Compaction parameter sizing requires care: `selectMessages` fills the budget to near-capacity, so the compaction summary must fit within the slack between kept-messages-tokens and the budget. Tests that barely overflow (1-2 messages dropped) tend to fail because the summary has no room. Significant overflow (5+ dropped) works reliably.
+- Tool message content blocks (tool_use, tool_result) survive JSONL serialization perfectly -- JSON round-trip preserves all fields including nested `input` objects.
+
+**Test results**: 293 tests passing across 9 test files, type-check clean.
+
+Files created:
+- `src/integration/index.test.ts` - 16 integration tests
+- `src/integration/DECISIONS.md` - Integration validation decision record
+
 ## Open Questions
 
 None currently.
@@ -576,9 +610,12 @@ komatachi/
     │   ├── index.ts        # ToolDefinition + exportForApi + executeTool
     │   ├── index.test.ts   # 17 tests
     │   └── DECISIONS.md
-    └── agent/          # Phase 4: Agent Loop (orchestration)
-        ├── index.ts        # createAgent + processTurn + tool dispatch + compaction
-        ├── index.test.ts   # 25 tests
+    ├── agent/          # Phase 4: Agent Loop (orchestration)
+    │   ├── index.ts        # createAgent + processTurn + tool dispatch + compaction
+    │   ├── index.test.ts   # 25 tests
+    │   └── DECISIONS.md
+    └── integration/    # Phase 5: Integration Validation
+        ├── index.test.ts   # 16 end-to-end tests
         └── DECISIONS.md
 ```
 
