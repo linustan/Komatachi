@@ -12,6 +12,16 @@ This repository is focused on **Komatachi** - a distillation of OpenClaw being b
 
 Read `komatachi/PROGRESS.md` for current state, completed work, and next steps.
 
+## Orientation Before Exploration
+
+This project has thorough documentation. Before launching Explore agents or searching the codebase, **read the docs first**:
+
+1. `komatachi/PROGRESS.md` - covers project state, all completed work, decisions, and insights
+2. `komatachi/CLAUDE.md` - covers architecture, coding philosophy, and conventions
+3. Relevant `src/*/DECISIONS.md` - covers per-module design rationale
+
+Only use Explore agents for questions the docs don't answer (e.g., tracing specific code paths, finding implementation details). Don't rediscover what's already written down.
+
 ## Key Files
 
 - `komatachi/PROGRESS.md` - Source of truth for project state (read this first)
