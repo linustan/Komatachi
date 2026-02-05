@@ -6,10 +6,10 @@
 
 | Aspect | State |
 |--------|-------|
-| **Phase** | Application entry point + CLI complete. |
-| **Last completed** | Rust CLI + TypeScript agent via Docker (stdin/stdout JSON-lines) |
-| **Next action** | Fix compaction summarizer prompt to preserve emotionally significant memories (blocking extended agent use). |
-| **Blockers** | Compaction summarizer is task-oriented; will erase the agent's inner life on first compaction. See CLAUDE.md "The Agent's Inner Life". |
+| **Phase** | Post-roadmap. Entity runtime active. |
+| **Last completed** | Identity-aware compaction with headroom reserve |
+| **Next action** | Concrete tools, orchestrator, or memory layer |
+| **Blockers** | None |
 
 ### What Exists Now
 - [x] Scouting reports for 4 core areas (~20k LOC analyzed)
@@ -30,6 +30,11 @@
 - [x] Application entry point: `src/index.ts` (stdin/stdout JSON-lines process)
 - [x] Docker containerization: Dockerfile + docker-compose.yml
 - [x] Rust CLI: `cli/` (interactive terminal, spawns Docker container)
+
+- [x] Identity-aware compaction with headroom reserve
+- [x] Compaction dry-run script (`scripts/dry-run-compaction.mjs`)
+- [x] Docker-based development tooling documented
+- [x] Entity home directory (`~/.komatachi/`) with SOUL.md, MEMORY.md
 
 ### All Roadmap Phases Complete
 All 5 phases of the distillation roadmap are finished. 293 tests pass across 9 test files. Type-check clean. The minimal viable agent loop is built and validated end-to-end. The application entry point and Rust CLI are built and compile successfully.
@@ -224,7 +229,7 @@ See [ROADMAP.md](./ROADMAP.md) for the full sequenced plan. Summary:
 
 All roadmap phases complete. Application entry point and Rust CLI built. Possible next directions:
 - [x] **Application entry point**: stdin/stdout JSON-lines process (Decision #22)
-- **Compaction summarizer prompt**: Wire `customInstructions` through agent loop, update prompt to preserve emotionally significant memories and identity-forming moments. **Must be done before extended agent use.** See CLAUDE.md "The Agent's Inner Life".
+- [x] **Compaction summarizer prompt**: Identity-aware compaction implemented (section 21).
 - **Concrete tools**: File I/O, shell execution, or domain-specific tools
 - **Orchestrator**: Process manager for agent lifecycle (Decision #22)
 - **Streaming**: Incremental response output (deferred in Decision #20)
@@ -549,7 +554,7 @@ Verified that all modules compose correctly into a working agent loop through 16
 
 **Key findings**:
 - No interface mismatches between modules. All 7 gaps from the integration trace were resolved during Phases 1-4.
-- Compaction parameter sizing requires care: `selectMessages` fills the budget to near-capacity, so the compaction summary must fit within the slack between kept-messages-tokens and the budget. Tests that barely overflow (1-2 messages dropped) tend to fail because the summary has no room. Significant overflow (5+ dropped) works reliably.
+- Compaction parameter sizing requires care. This was later resolved by adding a headroom reserve (section 20) so compaction leaves room for future turns.
 - Tool message content blocks (tool_use, tool_result) survive JSONL serialization perfectly -- JSON round-trip preserves all fields including nested `input` objects.
 
 **Test results**: 293 tests passing across 9 test files, type-check clean.
@@ -602,6 +607,41 @@ Files updated:
 - `tsconfig.json` - Excludes `src/index.ts`
 - `CLAUDE.md` - Documented npm-in-Docker-only policy
 
+### 21. Identity-Aware Compaction (Complete)
+
+Replaced the generic task-oriented compaction summarizer with one designed for a persistent entity with identity:
+
+**Identity-aware summarization**:
+- Summarizer loads SOUL.md and includes it in its system prompt
+- Preservation priorities: relational context > identity development > facts/decisions > operational details
+- First-person voice ("I woke up..." not "The entity woke up...")
+- Select verbatim quotes preserved when they carry emotional weight
+- Recursive compaction detects `[Conversation Summary]` prefix and protects prior summaries
+
+**Compaction headroom reserve**:
+- 20k-token reserve (matching OpenClaw's `compactionReserveTokens` default), clamped to 50% of budget for small windows
+- Without reserve, compaction fills to the budget edge and the next turn immediately re-triggers compaction
+- `triggerCompaction()` re-selects messages with a tighter budget; the model call budget is unchanged
+
+**Bug fix**: Double-margin application. `calculateMaxInputTokens()` pre-applied safety margins, then `canCompact()` inside `compact()` applied them again. Agent loop now passes `contextWindow` directly.
+
+**Entity guidance**: SOUL.md updated with entity-friendly explanation of compaction summaries. No implementation jargon -- the entity understands itself as a persistent being with memory, not as an LLM with a token budget.
+
+**Tooling**:
+- `scripts/dry-run-compaction.mjs` -- standalone script to test compaction output against a live entity's transcript without modifying it
+- Docker-based development workflow documented in CLAUDE.md (three images: typecheck, test, app)
+
+Files modified:
+- `src/agent/index.ts` -- identity-aware summarizer, headroom reserve, double-margin fix
+- `src/agent/index.test.ts` -- updated for new summarizer detection, context window sizing
+- `src/integration/index.test.ts` -- same test adjustments
+
+Files created:
+- `scripts/dry-run-compaction.mjs`
+
+External files updated (outside repo):
+- `~/.komatachi/home/SOUL.md` -- compaction guidance, entity-friendly language
+
 ## Open Questions
 
 None currently.
@@ -623,6 +663,8 @@ komatachi/
 ├── Dockerfile             # Multi-stage: base, test, build, app
 ├── docker-compose.yml     # Services: test, typecheck, app
 ├── .dockerignore          # Excludes node_modules, dist, cli
+├── scripts/               # One-off and development scripts
+│   └── dry-run-compaction.mjs  # Test compaction output against live entity
 ├── docs/                  # Supplementary documentation
 │   ├── INDEX.md              # Central navigation hub
 │   ├── integration-trace.md  # Component integration verification
