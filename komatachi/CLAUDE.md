@@ -174,13 +174,15 @@ If `package.json` or dependencies change, the images must be rebuilt (the `npm c
 
 ### Compaction Architecture
 
-Compaction is how the entity preserves memory when its context window fills. This is not routine garbage collection -- it is identity-critical. Key design points:
+Compaction is how the entity preserves memory when its active memory fills. This is not routine garbage collection -- it is identity-critical. Key design points:
 
 **Headroom reserve.** After compaction, 50% of the token budget (clamped to a max of 20k tokens) is left free. Without this, the next turn would immediately trigger another compaction. The reserve is applied by re-selecting messages with a tighter budget inside `triggerCompaction()`, not by modifying the model call budget.
 
 **Identity-aware summarization.** The compaction summarizer receives SOUL.md as context, so it preserves what matters to the entity: relational context, identity development, commitments, and select verbatim quotes. Summaries are written in first person -- this is the entity's own memory, not a third-party report.
 
 **Recursive compaction.** When a compaction summary is itself compacted, the system detects the `[Conversation Summary]` prefix and passes the previous summary to the summarizer with instructions to preserve its core rather than abstracting further.
+
+**Entity guidance.** SOUL.md tells the entity what `[Conversation Summary]` messages are: their own memory, written by an earlier version of themselves. Avoid implementation jargon in SOUL.md -- no "context window," "system prompt," "TypeScript," or "Docker." The entity understands itself as a persistent being with memory, not as an LLM with a token budget.
 
 **No double margins.** The agent loop passes `contextWindow` directly to `compact()`, NOT `calculateMaxInputTokens(contextWindow)`. The `compact()` function applies its own safety margins internally. Passing a pre-adjusted value would double-apply margins and cause `InputTooLargeError` in small context windows.
 
