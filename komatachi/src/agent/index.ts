@@ -12,7 +12,9 @@
  * - callModel injected for testability (not a provider abstraction -- Claude-specific types)
  * - Non-streaming: complete response before processing
  * - Fail clearly: surface errors, no silent retries beyond SDK defaults
- * - Synchronous disk I/O, async only for LLM calls and tool execution
+ * - Logically synchronous: async/await on callModel and executeTool is a
+ *   TypeScript platform concession, not an architectural choice. Every await
+ *   is immediately awaited; no concurrent work happens behind it.
  */
 
 import type {
