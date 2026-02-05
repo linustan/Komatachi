@@ -9,29 +9,23 @@
  * - Respect boundaries: Summarizer summarizes; caller decides what to give it
  * - Explicit state: No hidden registries or caches
  * - Auditable: Every decision traceable from input to output
+ *
+ * Uses Claude API message types directly (Decision #13). Updated from
+ * trial distillation's own Message type during Phase 4 Agent Loop wiring.
  */
+
+import type {
+  Message,
+  ToolUseBlock,
+  ToolResultBlock,
+  TextBlock,
+} from "../conversation/index.js";
+
+export type { Message };
 
 // -----------------------------------------------------------------------------
 // Types
 // -----------------------------------------------------------------------------
-
-/**
- * A conversation message. Minimal type that captures what we need.
- * The actual message structure may be richer; we only access what we use.
- */
-export interface Message {
-  role: string;
-  content: unknown;
-  timestamp?: number;
-  // Tool result specific fields (present when role === "toolResult")
-  toolCallId?: string;
-  toolName?: string;
-  isError?: boolean;
-  details?: {
-    status?: string;
-    exitCode?: number;
-  };
-}
 
 /**
  * Configuration for compaction.
@@ -40,7 +34,7 @@ export interface CompactionConfig {
   /** Maximum tokens the summarization model can handle for input */
   maxInputTokens: number;
   /** Function to generate a summary from messages */
-  summarize: (messages: Message[], previousSummary?: string) => Promise<string>;
+  summarize: (messages: readonly Message[], previousSummary?: string) => Promise<string>;
   /** Optional: Instructions to guide summarization */
   customInstructions?: string;
   /** Optional: Previous summary to build upon */
@@ -70,12 +64,15 @@ export interface CompactionMetadata {
 
 /**
  * A tool invocation that failed.
+ *
+ * In Claude API format, tool results are content blocks within user messages.
+ * The tool name is resolved by cross-referencing with the preceding
+ * assistant message's tool_use blocks.
  */
 export interface ToolFailure {
   toolCallId: string;
   toolName: string;
   errorSummary: string;
-  exitCode?: number;
 }
 
 /**
@@ -121,6 +118,8 @@ const FALLBACK_SUMMARY = "Summary unavailable. Older conversation history was tr
  *
  * This is a rough approximation: ~4 characters per token for English text.
  * The safety margin compensates for underestimation.
+ *
+ * Handles both string content and Claude API content block arrays.
  */
 export function estimateTokens(message: Message): number {
   const content = message.content;
@@ -129,18 +128,21 @@ export function estimateTokens(message: Message): number {
   if (typeof content === "string") {
     text = content;
   } else if (Array.isArray(content)) {
-    // Content blocks (common in Claude API)
+    // Content blocks (Claude API format)
     text = content
       .map((block) => {
-        if (typeof block === "string") return block;
-        if (block && typeof block === "object" && "text" in block) {
-          return String(block.text);
+        if (block.type === "text") return block.text;
+        if (block.type === "tool_use") return JSON.stringify(block.input);
+        if (block.type === "tool_result") {
+          const rc = block.content;
+          if (typeof rc === "string") return rc;
+          return rc.map((b: TextBlock) => b.text).join("\n");
         }
         return "";
       })
       .join("\n");
   } else {
-    text = JSON.stringify(content);
+    text = "";
   }
 
   // ~4 chars per token is a reasonable approximation for English
@@ -150,7 +152,7 @@ export function estimateTokens(message: Message): number {
 /**
  * Estimate total tokens across multiple messages.
  */
-export function estimateMessagesTokens(messages: Message[]): number {
+export function estimateMessagesTokens(messages: readonly Message[]): number {
   return messages.reduce((sum, msg) => sum + estimateTokens(msg), 0);
 }
 
@@ -178,7 +180,7 @@ export class InputTooLargeError extends Error {
  * Check if messages can be compacted within the given context window.
  */
 export function canCompact(
-  messages: Message[],
+  messages: readonly Message[],
   maxInputTokens: number
 ): { ok: true } | { ok: false; reason: string; inputTokens: number } {
   const inputTokens = Math.ceil(estimateMessagesTokens(messages) * TOKEN_SAFETY_MARGIN);
@@ -200,49 +202,66 @@ export function canCompact(
 // -----------------------------------------------------------------------------
 
 /**
- * Extract text content from a message's content field.
+ * Extract the text content from a tool_result block's content field.
  */
-function extractTextContent(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-
-  return content
-    .filter((block) => block && typeof block === "object" && block.type === "text")
-    .map((block) => String(block.text || ""))
-    .join("\n");
+function extractToolResultText(block: ToolResultBlock): string {
+  if (typeof block.content === "string") return block.content;
+  if (Array.isArray(block.content)) {
+    return block.content.map((b) => b.text).join("\n");
+  }
+  return "";
 }
 
 /**
  * Extract tool failures from messages.
  *
+ * In Claude API format, tool failures are tool_result content blocks
+ * with is_error: true inside user messages. The tool name is resolved
+ * by cross-referencing with tool_use blocks in assistant messages.
+ *
  * Tool failures are valuable context that should be preserved in summaries
  * so the agent doesn't repeat the same mistakes.
  */
-export function extractToolFailures(messages: Message[]): ToolFailure[] {
+export function extractToolFailures(messages: readonly Message[]): ToolFailure[] {
+  // First pass: build tool_use_id -> tool_name mapping from assistant messages
+  const toolNameMap = new Map<string, string>();
+  for (const message of messages) {
+    if (message.role !== "assistant" || typeof message.content === "string") continue;
+    for (const block of message.content) {
+      if (block.type === "tool_use") {
+        toolNameMap.set((block as ToolUseBlock).id, (block as ToolUseBlock).name);
+      }
+    }
+  }
+
+  // Second pass: find error tool_result blocks in user messages
   const failures: ToolFailure[] = [];
   const seen = new Set<string>();
 
   for (const message of messages) {
-    if (message.role !== "toolResult" || !message.isError) continue;
-    if (!message.toolCallId || seen.has(message.toolCallId)) continue;
+    if (message.role !== "user" || typeof message.content === "string") continue;
+    for (const block of message.content) {
+      if (block.type !== "tool_result" || !block.is_error) continue;
 
-    seen.add(message.toolCallId);
+      const toolResult = block as ToolResultBlock;
+      if (seen.has(toolResult.tool_use_id)) continue;
+      seen.add(toolResult.tool_use_id);
 
-    const errorText = extractTextContent(message.content)
-      .replace(/\s+/g, " ")
-      .trim();
+      const errorText = extractToolResultText(toolResult)
+        .replace(/\s+/g, " ")
+        .trim();
 
-    const truncated =
-      errorText.length > MAX_FAILURE_CHARS
-        ? errorText.slice(0, MAX_FAILURE_CHARS - 3) + "..."
-        : errorText || "failed (no output)";
+      const truncated =
+        errorText.length > MAX_FAILURE_CHARS
+          ? errorText.slice(0, MAX_FAILURE_CHARS - 3) + "..."
+          : errorText || "failed (no output)";
 
-    failures.push({
-      toolCallId: message.toolCallId,
-      toolName: message.toolName || "tool",
-      errorSummary: truncated,
-      exitCode: message.details?.exitCode,
-    });
+      failures.push({
+        toolCallId: toolResult.tool_use_id,
+        toolName: toolNameMap.get(toolResult.tool_use_id) || "tool",
+        errorSummary: truncated,
+      });
+    }
   }
 
   return failures;
@@ -274,8 +293,7 @@ export function formatToolFailuresSection(failures: ToolFailure[]): string {
   if (failures.length === 0) return "";
 
   const lines = failures.slice(0, MAX_TOOL_FAILURES).map((f) => {
-    const exit = f.exitCode !== undefined ? ` (exit ${f.exitCode})` : "";
-    return `- ${f.toolName}${exit}: ${f.errorSummary}`;
+    return `- ${f.toolName}: ${f.errorSummary}`;
   });
 
   if (failures.length > MAX_TOOL_FAILURES) {
@@ -321,7 +339,7 @@ export function formatFileOperationsSection(
  * for reducing input size before calling this function.
  */
 export async function compact(
-  messages: Message[],
+  messages: readonly Message[],
   fileOps: FileOperations,
   config: CompactionConfig
 ): Promise<CompactionResult> {
@@ -404,8 +422,8 @@ export interface SummarizerOptions {
  */
 export function createSummarizer(
   options: SummarizerOptions
-): (messages: Message[], previousSummary?: string) => Promise<string> {
-  return async (messages: Message[], previousSummary?: string): Promise<string> => {
+): (messages: readonly Message[], previousSummary?: string) => Promise<string> {
+  return async (messages: readonly Message[], previousSummary?: string): Promise<string> => {
     const conversationText = messages
       .map((msg) => {
         const content =
