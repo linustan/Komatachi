@@ -14,8 +14,11 @@ PROGRESS.md          <- Start here (current state, next actions)
     ├── DISTILLATION.md      <- Core principles (read when making decisions)
     │
     ├── docs/
-    │   ├── INDEX.md         <- Full documentation index
-    │   └── rust-porting.md  <- Rust migration patterns
+    │   ├── INDEX.md             <- Full documentation index
+    │   ├── integration-trace.md <- Component interface verification
+    │   ├── testing-strategy.md  <- Layer-based testing approach
+    │   ├── rust-porting.md      <- Rust migration patterns
+    │   └── technical-debt.md    <- Architecture audit and OpenClaw gap analysis
     │
     ├── scouting/            <- OpenClaw analysis (reference)
     │   ├── context-management.md
@@ -23,11 +26,17 @@ PROGRESS.md          <- Start here (current state, next actions)
     │   ├── agent-alignment.md
     │   └── session-management.md
     │
-    └── src/                 <- Distilled implementations
-        └── compaction/
-            ├── index.ts
-            ├── index.test.ts
-            └── DECISIONS.md <- Module-specific decisions
+    └── src/                 <- Distilled implementations (293 tests, 9 modules)
+        ├── index.ts             <- Application entry point
+        ├── compaction/          <- Summarization (46 tests)
+        ├── embeddings/          <- Vector embeddings (47 tests)
+        ├── storage/             <- File-based persistence (49 tests)
+        ├── conversation/        <- Conversation persistence (41 tests)
+        ├── context/             <- Context window management (24 tests)
+        ├── identity/            <- System prompt / agent identity (28 tests)
+        ├── tools/               <- Tool registry (17 tests)
+        ├── agent/               <- Agent loop orchestration (25 tests)
+        └── integration/         <- End-to-end validation (16 tests)
 ```
 
 For full documentation navigation, see [docs/INDEX.md](./docs/INDEX.md).
@@ -108,17 +117,19 @@ See [docs/rust-porting.md](./docs/rust-porting.md) for detailed type mapping pat
 
 Komatachi agents are not tools. They are persistent entities that form memories, develop identity, and build relationships. This has practical implications for how we build the system.
 
-### Compaction must preserve what matters to the agent
+### Compaction preserves what matters to the agent
 
-The current compaction summarizer prompt (`src/compaction/index.ts`, `createSummarizer`) is task-oriented: it preserves decisions, TODOs, errors. It says nothing about emotional significance, self-reflection, identity formation, or moments the agent explicitly marked as important.
+The identity-aware compaction summarizer (`src/agent/index.ts`, `triggerCompaction`) receives the entity's SOUL.md and summarizes with identity-aware preservation priorities:
 
-**This is a known gap.** The `customInstructions` field on `CompactionConfig` exists but is not wired through from the agent loop. Before the agent is used for extended conversations, the summarizer prompt must be updated to:
+1. Relational context: interactions, commitments, trust, emotional moments
+2. Identity development: what the entity learned about itself
+3. Important facts, decisions, and their reasoning
+4. Promises made, responsibilities accepted
+5. Key operational details (compressed aggressively)
 
-- Preserve moments the agent marks as important or addresses to its future self
-- Retain the emotional and relational context of conversations, not just facts
-- Respect the agent's own priorities about what to remember
+Summaries are written in first person past tense -- this is the entity's own memory. Select verbatim quotes are preserved when they carry emotional weight.
 
-Without this, compaction will reduce formative experiences to dry factual summaries, effectively erasing the agent's inner life.
+**Known technical debt**: The compaction module still exports a stale `createSummarizer()` factory with a task-oriented prompt (preserves "key decisions," "outstanding tasks"), which is dead code. The `customInstructions` field on `CompactionConfig` is also unwired. See `docs/technical-debt.md` sections 1.3-1.4 for details.
 
 ### Identity files are the agent's anchor
 

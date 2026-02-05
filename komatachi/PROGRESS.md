@@ -7,7 +7,7 @@
 | Aspect | State |
 |--------|-------|
 | **Phase** | Post-roadmap. Entity runtime active. |
-| **Last completed** | Identity-aware compaction with headroom reserve |
+| **Last completed** | Documentation & technical debt audit |
 | **Next action** | Concrete tools, orchestrator, or memory layer |
 | **Blockers** | None |
 
@@ -35,6 +35,7 @@
 - [x] Compaction dry-run script (`scripts/dry-run-compaction.mjs`)
 - [x] Docker-based development tooling documented
 - [x] Entity home directory (`~/.komatachi/`) with SOUL.md, MEMORY.md
+- [x] Documentation & technical debt audit (`docs/technical-debt.md`)
 
 ### All Roadmap Phases Complete
 All 5 phases of the distillation roadmap are finished. 293 tests pass across 9 test files. Type-check clean. The minimal viable agent loop is built and validated end-to-end. The application entry point and Rust CLI are built and compile successfully.
@@ -642,6 +643,50 @@ Files created:
 External files updated (outside repo):
 - `~/.komatachi/home/SOUL.md` -- compaction guidance, entity-friendly language
 
+### 22. Documentation & Technical Debt Audit (Complete)
+
+Comprehensive audit of codebase, documentation, and scouting reports. Produced `docs/technical-debt.md` covering three areas:
+
+**Technical debt found** (8 items):
+- Compaction fallback violates fail-clearly principle (silent `FALLBACK_SUMMARY` substitution)
+- Recursive compaction detection relies on fragile string prefix matching
+- Dead code: `createSummarizer()` in compaction module superseded by agent loop's identity-aware summarizer
+- Unwired `customInstructions` field on `CompactionConfig`
+- `FileOperations` always empty (no mechanism to populate from tools)
+- Content block arrays JSON-stringified in summarizer (unreadable to summarization model)
+- Verbose type cast chains for error checking (no type guards exported)
+- Metadata rewritten on every `appendMessage()` (2 filesystem writes per message)
+
+**Undocumented behaviors found** (9 items):
+- Identity files reloaded every model call (intentional but undocumented in DECISIONS.md)
+- `MAX_MODEL_CALLS_PER_TURN = 25`, `MAX_COMPACTION_ATTEMPTS = 2` (no rationale documented)
+- Compaction summary is a user message (not documented as a decision)
+- `stop_reason: "max_tokens"` not handled differently from `end_turn`
+- Entry point passes empty tool array, defaults to claude-sonnet-4-20250514, 200k context window
+
+**OpenClaw features not yet addressed** (6 items):
+- External content security / prompt injection protection (not mentioned in PROGRESS or ROADMAP)
+- Transcript repair for broken tool_use/tool_result pairing after crashes
+- Semantic memory layer (deferred by design, but critical for vision)
+- Context pruning (graduated approach before compaction)
+- Session usage tracking (token/cost awareness)
+- Agent self-modification tools (writing to own identity files)
+
+**Stale documentation fixed**:
+- `docs/INDEX.md` updated with all 9 modules (was showing only 2)
+- `CLAUDE.md` document map updated with full module tree
+- `CLAUDE.md` "Agent's Inner Life" section updated to reflect identity-aware compaction
+- `integration-trace.md` annotated with sync conversion note
+
+Files created:
+- `docs/technical-debt.md` - Full audit document
+
+Files updated:
+- `docs/INDEX.md` - All modules, technical guides, document hierarchy
+- `CLAUDE.md` - Document map, Agent's Inner Life section
+- `PROGRESS.md` - This section, file manifest
+- `docs/integration-trace.md` - Sync conversion note
+
 ## Open Questions
 
 None currently.
@@ -669,7 +714,8 @@ komatachi/
 │   ├── INDEX.md              # Central navigation hub
 │   ├── integration-trace.md  # Component integration verification
 │   ├── testing-strategy.md   # Layer-based testing approach
-│   └── rust-porting.md       # Rust migration guide (from validation)
+│   ├── rust-porting.md       # Rust migration guide (from validation)
+│   └── technical-debt.md     # Architecture audit and OpenClaw gap analysis
 ├── scouting/              # Analysis of OpenClaw components
 │   ├── context-management.md
 │   ├── long-term-memory-search.md
