@@ -6,9 +6,9 @@
 
 | Aspect | State |
 |--------|-------|
-| **Phase** | Phase 5 complete. All roadmap phases finished. |
-| **Last completed** | Phase 5: Integration Validation (16 end-to-end tests) |
-| **Next action** | Roadmap complete. Ready for next milestone (stdin/stdout entry point, orchestrator, or new roadmap). |
+| **Phase** | Application entry point + CLI complete. |
+| **Last completed** | Rust CLI + TypeScript agent via Docker (stdin/stdout JSON-lines) |
+| **Next action** | Concrete tools, orchestrator, streaming, or memory layer. |
 | **Blockers** | None |
 
 ### What Exists Now
@@ -27,9 +27,12 @@
 - [x] Agent Loop module: `src/agent/` (25 tests)
 - [x] Compaction module updated to use Claude API message types
 - [x] Integration validation: `src/integration/` (16 tests)
+- [x] Application entry point: `src/index.ts` (stdin/stdout JSON-lines process)
+- [x] Docker containerization: Dockerfile + docker-compose.yml
+- [x] Rust CLI: `cli/` (interactive terminal, spawns Docker container)
 
 ### All Roadmap Phases Complete
-All 5 phases of the distillation roadmap are finished. 293 tests pass across 9 test files. Type-check clean. The minimal viable agent loop is built and validated end-to-end.
+All 5 phases of the distillation roadmap are finished. 293 tests pass across 9 test files. Type-check clean. The minimal viable agent loop is built and validated end-to-end. The application entry point and Rust CLI are built and compile successfully.
 
 ---
 
@@ -219,8 +222,8 @@ See [ROADMAP.md](./ROADMAP.md) for the full sequenced plan. Summary:
 - [x] **Phase 4**: Agent Loop (main execution loop wiring everything together)
 - [x] **Phase 5**: Integration Validation (end-to-end pipeline test)
 
-All roadmap phases complete. Possible next directions:
-- **Application entry point**: stdin/stdout JSON-lines process (Decision #22)
+All roadmap phases complete. Application entry point and Rust CLI built. Possible next directions:
+- [x] **Application entry point**: stdin/stdout JSON-lines process (Decision #22)
 - **Concrete tools**: File I/O, shell execution, or domain-specific tools
 - **Orchestrator**: Process manager for agent lifecycle (Decision #22)
 - **Streaming**: Incremental response output (deferred in Decision #20)
@@ -554,6 +557,50 @@ Files created:
 - `src/integration/index.test.ts` - 16 integration tests
 - `src/integration/DECISIONS.md` - Integration validation decision record
 
+### 20. Application Entry Point + Rust CLI (Complete)
+
+Built the stdin/stdout JSON-lines entry point (Decision #22) and a Rust CLI that drives it via Docker.
+
+**Architecture**:
+```
+Rust CLI (terminal) --stdin/stdout JSON-lines--> Docker container (node dist/index.js)
+```
+
+**What was built**:
+
+- `src/index.ts` -- Application entry point. Reads config from env vars, creates Storage + ConversationStore, wires up `callModel` via `@anthropic-ai/sdk`, creates Agent, runs stdin/stdout JSON-lines message loop.
+- `cli/Cargo.toml` + `cli/src/main.rs` -- Rust CLI. Builds Docker image, spawns `docker run -i`, waits for ready signal, REPL loop exchanging JSON-lines. Dependencies: `serde`, `serde_json` only.
+- Dockerfile updated: `tsconfig.build.json` for full compilation (includes index.ts + SDK); base tsconfig excludes index.ts (no SDK on host).
+- docker-compose.yml updated: `stdin_open: true`, `ANTHROPIC_API_KEY` passthrough, named volumes for data/home persistence.
+
+**JSON-lines protocol**:
+- CLI -> Agent: `{"type":"input","text":"..."}`
+- Agent -> CLI: `{"type":"ready"}`, `{"type":"output","text":"..."}`, `{"type":"error","message":"..."}`
+
+**Key decisions**:
+- npm/node never runs on the host -- all JavaScript execution sandboxed in Docker. Lockfile regenerated via `docker run ... npm install --package-lock-only`.
+- Two tsconfigs: `tsconfig.json` (excludes `src/index.ts`, used by tests and local tooling) and `tsconfig.build.json` (includes everything, used by Docker build).
+- Rust CLI uses `std::process::Command` to spawn Docker -- no async runtime, no readline library.
+- `@anthropic-ai/sdk` added as runtime dependency; SDK response mapped to Komatachi's `CallModelResult` type at the boundary.
+
+**Verification results**: 293 tests passing, type-check clean, Docker image builds, Rust CLI compiles.
+
+Files created:
+- `src/index.ts` - Application entry point
+- `tsconfig.build.json` - Full-build tsconfig for Docker
+- `cli/Cargo.toml` - Rust crate config
+- `cli/src/main.rs` - Rust CLI
+- `cli/README.md` - CLI usage and architecture documentation
+
+Files updated:
+- `package.json` - Added `@anthropic-ai/sdk` dependency
+- `package-lock.json` - Regenerated via Docker
+- `Dockerfile` - Uses `tsconfig.build.json` for build stage
+- `docker-compose.yml` - stdin_open, env, volumes
+- `.dockerignore` - Excludes `cli/`
+- `tsconfig.json` - Excludes `src/index.ts`
+- `CLAUDE.md` - Documented npm-in-Docker-only policy
+
 ## Open Questions
 
 None currently.
@@ -564,58 +611,67 @@ None currently.
 
 ```
 komatachi/
-├── CLAUDE.md           # Project context (includes document map)
-├── PROGRESS.md         # This file - update as work progresses
-├── ROADMAP.md          # Phased plan, decision authority, session protocol
-├── DISTILLATION.md     # Principles and process
-├── package.json        # Dependencies (vitest, typescript, @types/node)
-├── tsconfig.json       # TypeScript config
-├── vitest.config.ts    # Test runner config
-├── docs/               # Supplementary documentation
+├── CLAUDE.md              # Project context (includes document map)
+├── PROGRESS.md            # This file - update as work progresses
+├── ROADMAP.md             # Phased plan, decision authority, session protocol
+├── DISTILLATION.md        # Principles and process
+├── package.json           # Dependencies (@anthropic-ai/sdk, vitest, typescript)
+├── tsconfig.json          # TypeScript config (excludes src/index.ts)
+├── tsconfig.build.json    # Full build config for Docker (includes src/index.ts)
+├── vitest.config.ts       # Test runner config
+├── Dockerfile             # Multi-stage: base, test, build, app
+├── docker-compose.yml     # Services: test, typecheck, app
+├── .dockerignore          # Excludes node_modules, dist, cli
+├── docs/                  # Supplementary documentation
 │   ├── INDEX.md              # Central navigation hub
 │   ├── integration-trace.md  # Component integration verification
 │   ├── testing-strategy.md   # Layer-based testing approach
 │   └── rust-porting.md       # Rust migration guide (from validation)
-├── scouting/           # Analysis of OpenClaw components
+├── scouting/              # Analysis of OpenClaw components
 │   ├── context-management.md
 │   ├── long-term-memory-search.md
 │   ├── agent-alignment.md
 │   └── session-management.md
+├── cli/                   # Rust CLI
+│   ├── Cargo.toml            # serde, serde_json
+│   └── src/
+│       └── main.rs           # Interactive REPL, spawns Docker container
 └── src/
-    ├── compaction/     # Trial distillation (validated, updated Phase 4)
+    ├── index.ts           # Application entry point (stdin/stdout JSON-lines)
+    ├── compaction/        # Trial distillation (validated, updated Phase 4)
     │   ├── index.ts
-    │   ├── index.test.ts   # 46 tests
+    │   ├── index.test.ts     # 46 tests
     │   └── DECISIONS.md
-    ├── embeddings/     # Embeddings sub-module (validated)
-    │   ├── index.ts        # Provider interface + OpenAI + utilities
-    │   ├── index.test.ts   # 47 tests
+    ├── embeddings/        # Embeddings sub-module (validated)
+    │   ├── index.ts          # Provider interface + OpenAI + utilities
+    │   ├── index.test.ts     # 47 tests
     │   └── DECISIONS.md
-    ├── storage/        # Phase 1.1: Generic file-based persistence
-    │   ├── index.ts        # Storage interface + createStorage()
-    │   ├── index.test.ts   # 49 tests
+    ├── storage/           # Phase 1.1: Generic file-based persistence
+    │   ├── index.ts          # Storage interface + createStorage()
+    │   ├── index.test.ts     # 49 tests
     │   └── DECISIONS.md
-    ├── conversation/   # Phase 1.2: Conversation persistence
-    │   ├── index.ts        # ConversationStore + Claude API message types
-    │   ├── index.test.ts   # 41 tests
+    ├── conversation/      # Phase 1.2: Conversation persistence
+    │   ├── index.ts          # ConversationStore + Claude API message types
+    │   ├── index.test.ts     # 41 tests
     │   └── DECISIONS.md
-    ├── context/        # Phase 2.1: Context window management
-    │   ├── index.ts        # selectMessages + estimateStringTokens
-    │   ├── index.test.ts   # 24 tests
+    ├── context/           # Phase 2.1: Context window management
+    │   ├── index.ts          # selectMessages + estimateStringTokens
+    │   ├── index.test.ts     # 24 tests
     │   └── DECISIONS.md
-    ├── identity/       # Phase 3.1: System prompt / agent identity
-    │   ├── index.ts        # loadIdentityFiles + buildSystemPrompt
-    │   ├── index.test.ts   # 28 tests
+    ├── identity/          # Phase 3.1: System prompt / agent identity
+    │   ├── index.ts          # loadIdentityFiles + buildSystemPrompt
+    │   ├── index.test.ts     # 28 tests
     │   └── DECISIONS.md
-    ├── tools/          # Phase 3.2: Tool registry
-    │   ├── index.ts        # ToolDefinition + exportForApi + executeTool
-    │   ├── index.test.ts   # 17 tests
+    ├── tools/             # Phase 3.2: Tool registry
+    │   ├── index.ts          # ToolDefinition + exportForApi + executeTool
+    │   ├── index.test.ts     # 17 tests
     │   └── DECISIONS.md
-    ├── agent/          # Phase 4: Agent Loop (orchestration)
-    │   ├── index.ts        # createAgent + processTurn + tool dispatch + compaction
-    │   ├── index.test.ts   # 25 tests
+    ├── agent/             # Phase 4: Agent Loop (orchestration)
+    │   ├── index.ts          # createAgent + processTurn + tool dispatch + compaction
+    │   ├── index.test.ts     # 25 tests
     │   └── DECISIONS.md
-    └── integration/    # Phase 5: Integration Validation
-        ├── index.test.ts   # 16 end-to-end tests
+    └── integration/       # Phase 5: Integration Validation
+        ├── index.test.ts     # 16 end-to-end tests
         └── DECISIONS.md
 ```
 

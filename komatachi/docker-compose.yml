@@ -1,0 +1,27 @@
+services:
+  test:
+    build:
+      context: .
+      target: test
+    command: npm test
+
+  typecheck:
+    build:
+      context: .
+      target: test
+    command: npm run build
+
+  app:
+    build:
+      context: .
+      target: app
+    stdin_open: true
+    environment:
+      - ANTHROPIC_API_KEY
+    volumes:
+      - app-data:/data
+      - app-home:/home/agent
+
+volumes:
+  app-data:
+  app-home:

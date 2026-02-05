@@ -135,6 +135,26 @@ The OpenClaw codebase is our teacher, not our starting point.
 - **Question everything** - "Is this essential, or is it historical accident?"
 - **Document decisions** - Record what we preserved, discarded, and why
 
+### npm and Node.js: Docker Only
+
+**Never run npm or node outside of Docker.** No `npm install`, `npm test`, `npm run build`, or any npm/node command directly on the host. The npm ecosystem is an attack surface; all JavaScript execution is sandboxed inside Docker containers.
+
+To add or update a dependency:
+
+1. Edit `package.json` with the new dependency
+2. Regenerate the lockfile via Docker:
+   ```sh
+   docker run --rm \
+     -v "$(pwd)/package.json:/app/package.json" \
+     -v "$(pwd)/package-lock.json:/app/package-lock.json" \
+     -w /app node:22-slim npm install --package-lock-only
+   ```
+3. The Dockerfile uses `npm ci`, which requires the lockfile to match `package.json` exactly
+
+To run tests: `docker compose run --rm test`
+To type-check: `docker compose run --rm typecheck`
+To build the app image: `docker compose build app`
+
 ### Preserving Research
 
 When you send a Task agent (Explore, general-purpose, etc.) to investigate the OpenClaw codebase or research a question, **save the results** so future sessions don't repeat the work:
