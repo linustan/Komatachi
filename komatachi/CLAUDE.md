@@ -144,6 +144,50 @@ The OpenClaw codebase is our teacher, not our starting point.
 
 ---
 
+## Development
+
+### Docker-Only Tooling
+
+Never run `npm`, `npx`, `node`, or any JS/TS tooling directly on the host machine. Use Docker instead.
+
+Three images exist for Komatachi development:
+
+| Image | Purpose | Default CMD |
+|-------|---------|-------------|
+| `komatachi-typecheck:latest` | Type-checking | `npm test` |
+| `komatachi-test:latest` | Running tests | `npm test` |
+| `komatachi-app:latest` | Running the app | `node dist/index.js` |
+
+**Type-check** (mount current source over baked-in copy):
+```sh
+docker run --rm -v ./komatachi/src:/app/src komatachi-typecheck:latest npx tsc --noEmit
+```
+
+**Run tests**:
+```sh
+docker run --rm -v ./komatachi/src:/app/src komatachi-test:latest npm test
+```
+
+Both commands are run from the repo root. They mount `src/` over the image's copy so changes are picked up without rebuilding.
+
+If `package.json` or dependencies change, the images must be rebuilt (the `npm ci` step is baked in).
+
+### Compaction Architecture
+
+Compaction is how the entity preserves memory when its context window fills. This is not routine garbage collection -- it is identity-critical. Key design points:
+
+**Headroom reserve.** After compaction, 50% of the token budget (clamped to a max of 20k tokens) is left free. Without this, the next turn would immediately trigger another compaction. The reserve is applied by re-selecting messages with a tighter budget inside `triggerCompaction()`, not by modifying the model call budget.
+
+**Identity-aware summarization.** The compaction summarizer receives SOUL.md as context, so it preserves what matters to the entity: relational context, identity development, commitments, and select verbatim quotes. Summaries are written in first person -- this is the entity's own memory, not a third-party report.
+
+**Recursive compaction.** When a compaction summary is itself compacted, the system detects the `[Conversation Summary]` prefix and passes the previous summary to the summarizer with instructions to preserve its core rather than abstracting further.
+
+**No double margins.** The agent loop passes `contextWindow` directly to `compact()`, NOT `calculateMaxInputTokens(contextWindow)`. The `compact()` function applies its own safety margins internally. Passing a pre-adjusted value would double-apply margins and cause `InputTooLargeError` in small context windows.
+
+**Test context windows.** Tests that trigger compaction use `contextWindow: 1200` (not 1000). The reserve reduces the keep-budget by half, so tests need enough headroom for both triggering overflow AND fitting the compacted messages within the compaction model's input limit.
+
+---
+
 ## Working Conventions
 
 ### Session Continuity

@@ -437,13 +437,12 @@ describe("Agent Loop", () => {
       conversationStore.initialize("test-model");
 
       // Pre-fill conversation with messages to force overflow.
-      // Each message is ~50 tokens (200 chars / 4).
-      // With contextWindow=1000, maxTokens=200, system prompt ~50 tokens:
-      //   budget = 1000 - 50 - 200 = 750 tokens, fits ~15 messages
-      // 20 pre-filled + 1 new = 21 messages = ~1050 tokens, overflows by ~6 messages
-      // Dropped 6 messages = ~300 tokens. With 1.2 safety = 360 tokens.
-      // maxInputTokens for compaction = floor((1000/1.2)*0.75) = 625.
-      // effectiveMax in canCompact = floor(625*0.75) = 468 > 360. Fits.
+      // Each message is ~53 tokens (211 chars / 4).
+      // With contextWindow=1200, maxTokens=200, system prompt ~50 tokens:
+      //   budget = 1200 - 50 - 200 = 950, fits ~18 messages
+      // 20 pre-filled + 1 new = ~1060 tokens, overflows.
+      // Compaction reserve (clamped to 50% of budget) = 475.
+      // keepBudget = 475, keeps ~9 messages, compacts ~12 (~636 tokens).
       for (let i = 0; i < 20; i++) {
         conversationStore.appendMessage({
           role: i % 2 === 0 ? "user" : "assistant",
@@ -457,7 +456,7 @@ describe("Agent Loop", () => {
         tools: [],
         model: "test-model",
         maxTokens: 200,
-        contextWindow: 1000,
+        contextWindow: 1200,
         callModel,
       });
 

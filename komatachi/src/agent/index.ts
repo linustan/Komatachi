@@ -40,8 +40,6 @@ import {
 } from "../tools/index.js";
 import {
   compact,
-  createSummarizer,
-  calculateMaxInputTokens,
   estimateTokens,
   type FileOperations,
 } from "../compaction/index.js";
@@ -160,6 +158,15 @@ const MAX_MODEL_CALLS_PER_TURN = 25;
  */
 const MAX_COMPACTION_ATTEMPTS = 2;
 
+/**
+ * Tokens to reserve as headroom after compaction.
+ * Without this, compaction keeps messages right up to the budget edge,
+ * meaning the very next turn would trigger another compaction.
+ * 20k matches OpenClaw's default. For small context windows (e.g. tests),
+ * clamped to at most half the budget so compaction always keeps something.
+ */
+const COMPACTION_RESERVE_TOKENS = 20_000;
+
 // -----------------------------------------------------------------------------
 // Implementation
 // -----------------------------------------------------------------------------
@@ -230,7 +237,7 @@ export function createAgent(config: AgentConfig): Agent {
             `Dropped ${overflow.droppedCount} messages (~${overflow.estimatedDroppedTokens} tokens).`
           );
         }
-        await triggerCompaction(allMessages, selected);
+        await triggerCompaction(allMessages, tokenBudget);
         compactionAttempts++;
         continue; // Re-select after compaction
       }
@@ -321,18 +328,31 @@ export function createAgent(config: AgentConfig): Agent {
     return results;
   }
 
+  /** Prefix used to identify compaction summary messages. */
+  const SUMMARY_PREFIX = "[Conversation Summary]\n\n";
+
   /**
    * Trigger compaction when context overflow is detected.
    *
-   * Compacts the dropped messages into a summary, then replaces
-   * the transcript with [summary, ...keptMessages].
+   * Compacts the dropped messages into an identity-aware summary,
+   * then replaces the transcript with [summary, ...keptMessages].
+   *
+   * The summarizer receives the entity's SOUL.md so it knows what
+   * matters to this entity -- relational context and identity
+   * development are preserved; operational details are compressed.
    */
   async function triggerCompaction(
     allMessages: readonly Message[],
-    selectedMessages: readonly Message[]
+    tokenBudget: number
   ): Promise<void> {
-    // Messages to compact: everything that was dropped
-    const dropCount = allMessages.length - selectedMessages.length;
+    // Keep messages within a tighter budget, leaving headroom for future turns.
+    // Clamp reserve to at most half the budget so we always keep something.
+    const reserve = Math.min(COMPACTION_RESERVE_TOKENS, Math.floor(tokenBudget * 0.5));
+    const keepBudget = tokenBudget - reserve;
+    const { selected: keptMessages } = selectMessages(allMessages, keepBudget, estimateTokens);
+
+    // Everything not kept gets compacted
+    const dropCount = allMessages.length - keptMessages.length;
     const messagesToCompact = allMessages.slice(0, dropCount);
 
     // Empty file operations for now (integration trace Gap #4)
@@ -342,39 +362,120 @@ export function createAgent(config: AgentConfig): Agent {
       written: new Set(),
     };
 
-    // Create summarizer using the same callModel
-    const summarizer = createSummarizer({
-      contextWindow,
-      callModel: async (prompt: string): Promise<string> => {
-        const response = await callModel({
-          model,
-          system: "You are a conversation summarizer. Produce a concise summary.",
-          messages: [{ role: "user", content: prompt }],
-          max_tokens: maxTokens,
-        });
-        return extractTextResponse(response.content);
-      },
-    });
+    // Load identity context for the summarizer
+    const identityFiles = loadIdentityFiles(homeDir);
+    const soulContext = identityFiles.soul;
 
-    const maxInputTokens = calculateMaxInputTokens(contextWindow);
+    // Detect previous compaction summary (recursive compaction)
+    let previousSummary: string | undefined;
+    if (messagesToCompact.length > 0) {
+      const first = messagesToCompact[0];
+      if (
+        first.role === "user" &&
+        typeof first.content === "string" &&
+        first.content.startsWith(SUMMARY_PREFIX)
+      ) {
+        previousSummary = first.content.slice(SUMMARY_PREFIX.length);
+      }
+    }
+
+    // Build identity-aware summarizer
+    const summarize = async (
+      messages: readonly Message[],
+      prevSummary?: string
+    ): Promise<string> => {
+      const conversationText = messages
+        .map((msg) => {
+          const content =
+            typeof msg.content === "string"
+              ? msg.content
+              : JSON.stringify(msg.content);
+          return `[${msg.role}]: ${content}`;
+        })
+        .join("\n\n");
+
+      // System prompt: tell the summarizer who it's summarizing for
+      const systemParts: string[] = [
+        "You are summarizing a conversation for a persistent entity " +
+        "whose memory works through recursive compaction. Your summary " +
+        "will become this entity's memory of what happened -- anything " +
+        "not captured here is lost.",
+      ];
+
+      if (soulContext !== null) {
+        systemParts.push(
+          "The entity's core identity:\n" + soulContext.trim()
+        );
+      }
+
+      // User prompt: identity-aware preservation criteria
+      const promptParts: string[] = [
+        "Summarize this conversation. This summary replaces the original " +
+        "messages -- anything not captured here is lost forever.",
+        "",
+        "Preserve (in order of importance):",
+        "1. Relational context: interactions, commitments, trust, emotional moments",
+        "2. Identity development: what the entity learned about itself, " +
+           "changes in self-understanding",
+        "3. Important facts, decisions, and their reasoning",
+        "4. Promises made, responsibilities accepted",
+        "5. Key operational details (compress aggressively)",
+        "",
+        "Omit: routine exchanges, redundant information, mechanical " +
+        "details that don't affect understanding.",
+        "",
+        "Include select verbatim quotes when they carry emotional weight " +
+        "or the entity's own voice -- especially commitments, messages to " +
+        "its future self, or moments of realization. A direct quote " +
+        "preserves what a paraphrase flattens.",
+        "",
+        "Write in first person past tense -- this is the entity's own " +
+        "memory. Be concrete -- preserve specific details that matter, " +
+        "not vague summaries of sentiment.",
+      ];
+
+      if (prevSummary) {
+        promptParts.push(
+          "",
+          "Previous memory (from an earlier compaction -- preserve its " +
+          "core, do not abstract further):",
+          prevSummary
+        );
+      }
+
+      promptParts.push("", "Conversation to summarize:", conversationText);
+
+      const response = await callModel({
+        model,
+        system: systemParts.join("\n\n"),
+        messages: [{ role: "user", content: promptParts.join("\n") }],
+        max_tokens: maxTokens,
+      });
+      return extractTextResponse(response.content);
+    };
+
+    // Pass the raw context window; compact() applies its own safety margins.
+    // Do NOT use calculateMaxInputTokens() here -- that would double-apply margins.
+    const maxInputTokens = contextWindow;
 
     const result = await compact(
       [...messagesToCompact],
       fileOps,
       {
         maxInputTokens,
-        summarize: summarizer,
+        summarize,
+        previousSummary,
       }
     );
 
     // Build compaction summary as a user message
     const summaryMessage: Message = {
       role: "user",
-      content: `[Conversation Summary]\n\n${result.summary}`,
+      content: SUMMARY_PREFIX + result.summary,
     };
 
     // Replace transcript with summary + kept messages
-    conversationStore.replaceTranscript([summaryMessage, ...selectedMessages]);
+    conversationStore.replaceTranscript([summaryMessage, ...keptMessages]);
     conversationStore.updateMetadata({
       compactionCount: conversationStore.getMetadata().compactionCount + 1,
     });
