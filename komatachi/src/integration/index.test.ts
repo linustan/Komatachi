@@ -349,7 +349,7 @@ describe("Integration: Full Pipeline", () => {
       const callModel = vi.fn<CallModel>(async (params: CallModelParams) => {
         modelCalls.push(params);
         // Compaction calls have the summarizer system prompt
-        if (params.system.includes("conversation summarizer")) {
+        if (params.system.includes("summarizing a conversation")) {
           return textResponse("Summary: discussed TypeScript and Rust.");
         }
         return textResponse(`Response ${modelCalls.length}`);
@@ -361,11 +361,11 @@ describe("Integration: Full Pipeline", () => {
 
       // Pre-fill conversation to trigger overflow.
       // Each message: "Message N: " (11 chars) + 200 x's = 211 chars = ~53 tokens.
-      // With contextWindow=1000, maxTokens=200, system prompt ~12 tokens:
-      //   budget = 1000 - 12 - 200 = 788 tokens
-      // 20 pre-filled + 1 new user (~6 tokens) = 20*53 + 6 = 1066 tokens.
-      // selectMessages keeps ~15 most recent (~748 tokens), drops ~6 (~318 tokens).
-      // After compaction: summary(~20 tokens) + 15 kept(~748) = ~768 < 788. Fits.
+      // With contextWindow=1200, maxTokens=200, system prompt ~12 tokens:
+      //   budget = 1200 - 12 - 200 = 988 tokens
+      // 20 pre-filled + 1 new user (~6 tokens) = 20*53 + 6 = 1066 tokens > 988.
+      // Compaction reserve (clamped to 50%) = 494. keepBudget = 494.
+      // Keeps ~9 messages, compacts ~12. Leaves headroom for future turns.
       for (let i = 0; i < 20; i++) {
         store.appendMessage({
           role: i % 2 === 0 ? "user" : "assistant",
@@ -379,7 +379,7 @@ describe("Integration: Full Pipeline", () => {
         tools: [],
         model: "claude-test",
         maxTokens: 200,
-        contextWindow: 1000,
+        contextWindow: 1200,
         callModel,
       });
 
@@ -418,7 +418,7 @@ describe("Integration: Full Pipeline", () => {
 
     it("continues operating normally after compaction", async () => {
       const callModel = vi.fn<CallModel>(async (params: CallModelParams) => {
-        if (params.system.includes("conversation summarizer")) {
+        if (params.system.includes("summarizing a conversation")) {
           return textResponse("Summary: earlier testing.");
         }
         return textResponse("Post-compaction response");
@@ -442,7 +442,7 @@ describe("Integration: Full Pipeline", () => {
         tools: [],
         model: "claude-test",
         maxTokens: 200,
-        contextWindow: 1000,
+        contextWindow: 1200,
         callModel,
       });
 
@@ -450,7 +450,7 @@ describe("Integration: Full Pipeline", () => {
       await agent.processTurn("Trigger compaction");
       expect(store.getMetadata().compactionCount).toBe(1);
 
-      // Turn 2: normal operation after compaction (larger context window to avoid re-compact)
+      // Turn 2: normal operation after compaction (reserve provides headroom)
       const agent2 = createAgent({
         conversationStore: store,
         homeDir,
@@ -643,7 +643,7 @@ describe("Integration: Full Pipeline", () => {
         callCount++;
 
         // Compaction summarizer
-        if (params.system.includes("conversation summarizer")) {
+        if (params.system.includes("summarizing a conversation")) {
           return textResponse("Summary: The agent created files foo.ts and bar.ts.");
         }
 
@@ -855,7 +855,7 @@ describe("Integration: Full Pipeline", () => {
 
     it("conversation metadata tracks all operations correctly", async () => {
       const callModel = vi.fn<CallModel>(async (params: CallModelParams) => {
-        if (params.system.includes("conversation summarizer")) {
+        if (params.system.includes("summarizing a conversation")) {
           return textResponse("Compact summary.");
         }
         return textResponse("OK");
@@ -889,8 +889,8 @@ describe("Integration: Full Pipeline", () => {
       expect(meta1.compactionCount).toBe(0);
 
       // Force compaction: add enough messages to overflow with small context window.
-      // 2 existing (from turn above) + 18 padding + 1 new = 21 messages.
-      for (let i = 0; i < 18; i++) {
+      // 2 existing (from turn above) + 20 padding + 1 new = 23 messages.
+      for (let i = 0; i < 20; i++) {
         store.appendMessage({
           role: i % 2 === 0 ? "user" : "assistant",
           content: `Padding ${i}: ${"x".repeat(200)}`,
@@ -903,7 +903,7 @@ describe("Integration: Full Pipeline", () => {
         tools: [],
         model: "claude-test",
         maxTokens: 200,
-        contextWindow: 1000,
+        contextWindow: 1200,
         callModel,
       });
 
